@@ -25,5 +25,5 @@ AES_KEY_BYTES   = 32
 AES_NONCE_BYTES = 12
 
 # ── SocketIO ──────────────────────────────────────────────────────────────────
-SOCKETIO_ASYNC_MODE = "threading"   # switched from eventlet (deprecated)
+SOCKETIO_ASYNC_MODE = "gevent"
 MAX_ROOMS           = int(os.getenv("MAX_ROOMS", 10))

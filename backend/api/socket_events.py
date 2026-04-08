@@ -112,8 +112,11 @@ def register_socket_events(socketio: SocketIO) -> None:
 
 
 def _generate_and_store_key(room_id: str, version: int) -> KeyRecord:
+    """Use fewer qubits on Railway for faster join response."""
+    num_qubits = min(BB84_NUM_QUBITS, 128)   # cap at 128 for prod speed
+
     result = run_bb84(
-        num_qubits    = BB84_NUM_QUBITS,
+        num_qubits    = num_qubits,
         noise_enabled = BB84_NOISE_ENABLED,
         depolar_prob  = BB84_DEPOLAR_PROB,
     )

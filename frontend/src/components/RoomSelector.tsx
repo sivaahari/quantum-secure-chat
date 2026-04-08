@@ -29,10 +29,10 @@ export function RoomSelector({ status, onJoin, onConnect }: RoomSelectorProps) {
         <CardHeader className="text-center pb-4">
           <div className="text-5xl mb-3">⚛🔐</div>
           <CardTitle className="text-xl text-slate-100">
-            Quantum-LLM Secure Chat
+            Quantum Secure Chat
           </CardTitle>
           <p className="text-sm text-slate-400 mt-1">
-            BB84 QKD · AES-256-GCM · Local LLM
+            BB84 QKD · AES-256-GCM · End-to-End Encrypted
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -76,7 +76,7 @@ export function RoomSelector({ status, onJoin, onConnect }: RoomSelectorProps) {
           <div className="pt-2 border-t border-border grid grid-cols-3 gap-2 text-center text-[10px] text-slate-600">
             <div>⚛ Qiskit BB84<br />simulation</div>
             <div>🔑 AES-256-GCM<br />encryption</div>
-            <div>🤖 Mistral-Nemo<br />LLM replies</div>
+            <div>🔄 Auto key<br />refresh</div>
           </div>
         </CardContent>
       </Card>
