@@ -37,7 +37,7 @@ export async function importKeyFromHex(hexKey: string): Promise<CryptoKey> {
   const keyBytes = hexToBytes(hexKey);
   return crypto.subtle.importKey(
     "raw",
-    keyBytes,
+    keyBytes as BufferSource,
     { name: ALGO, length: 256 },
     false,               // non-extractable (security best-practice)
     ["encrypt", "decrypt"]
@@ -61,7 +61,7 @@ export async function encryptMessage(
   const encoded     = new TextEncoder().encode(plaintext);
 
   const ciphertextBuf = await crypto.subtle.encrypt(
-    { name: ALGO, iv: nonce, tagLength: TAG_LENGTH, additionalData: AAD_BYTES },
+    { name: ALGO, iv: nonce as BufferSource, tagLength: TAG_LENGTH, additionalData: AAD_BYTES },
     key,
     encoded
   );
@@ -90,9 +90,9 @@ export async function decryptMessage(
   const ciphertext = base64ToBytes(payload.ciphertext_b64);
 
   const plaintextBuf = await crypto.subtle.decrypt(
-    { name: ALGO, iv: nonce, tagLength: TAG_LENGTH, additionalData: AAD_BYTES },
+    { name: ALGO, iv: nonce as BufferSource, tagLength: TAG_LENGTH, additionalData: AAD_BYTES },
     key,
-    ciphertext
+    ciphertext.buffer as ArrayBuffer
   );
 
   return new TextDecoder().decode(plaintextBuf);

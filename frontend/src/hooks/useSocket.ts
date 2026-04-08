@@ -142,9 +142,25 @@ export function useSocket(callbacks: SocketCallbacks) {
 
   // ── emit helpers ──────────────────────────────────────────────────────────
   const joinRoom = useCallback((roomId: string, username: string) => {
-    console.log("[Socket] 📤 Emitting join_room →", roomId, username);
-    socketRef.current?.emit("join_room", { room_id: roomId, username });
-  }, []);
+  const socket = socketRef.current;
+
+  if (!socket) {
+    console.error("[Socket] No socket instance");
+    return;
+  }
+
+  if (socket.connected) {
+    console.log("[Socket] 📤 Emitting join_room (connected)");
+    socket.emit("join_room", { room_id: roomId, username });
+  } else {
+    console.log("[Socket] Waiting for connect before join...");
+
+    socket.once("connect", () => {
+      console.log("[Socket] ✅ Connected → now joining");
+      socket.emit("join_room", { room_id: roomId, username });
+    });
+  }
+}, []);
 
   const leaveRoom = useCallback((roomId: string, username: string) => {
     socketRef.current?.emit("leave_room", { room_id: roomId, username });
