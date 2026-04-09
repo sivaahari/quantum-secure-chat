@@ -1,75 +1,90 @@
 /* frontend/src/index.css */
-
-
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-  
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
 @layer base {
   :root {
-    --background:   222 47% 8%;
-    --foreground:   210 40% 92%;
-    --card:         222 47% 11%;
-    --card-foreground: 210 40% 92%;
-    --popover:      222 47% 11%;
-    --popover-foreground: 210 40% 92%;
-    --primary:      199 100% 47%;
-    --primary-foreground: 222 47% 8%;
-    --secondary:    217 32% 17%;
-    --secondary-foreground: 210 40% 92%;
-    --muted:        217 32% 17%;
-    --muted-foreground: 215 20% 55%;
-    --accent:       217 32% 17%;
-    --accent-foreground: 210 40% 92%;
-    --destructive:  0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
-    --border:       217 32% 20%;
-    --input:        217 32% 20%;
-    --ring:         199 100% 47%;
-    --radius:       0.6rem;
+    --background:            222 47% 8%;
+    --foreground:            210 40% 92%;
+    --card:                  222 47% 11%;
+    --card-foreground:       210 40% 92%;
+    --popover:               222 47% 11%;
+    --popover-foreground:    210 40% 92%;
+    --primary:               199 100% 47%;
+    --primary-foreground:    222 47% 8%;
+    --secondary:             217 32% 17%;
+    --secondary-foreground:  210 40% 92%;
+    --muted:                 217 32% 17%;
+    --muted-foreground:      215 20% 55%;
+    --accent:                217 32% 17%;
+    --accent-foreground:     210 40% 92%;
+    --destructive:           0 84% 60%;
+    --destructive-foreground:210 40% 98%;
+    --border:                217 32% 20%;
+    --input:                 217 32% 20%;
+    --ring:                  199 100% 47%;
+    --radius:                0.6rem;
   }
 }
 
 @layer base {
-  * {
-    @apply border-border;
-  }
+  * { @apply border-border; }
+
   body {
     @apply bg-background text-foreground font-sans antialiased;
     background-image:
-      radial-gradient(ellipse at 20% 50%, rgba(0, 194, 240, 0.04) 0%, transparent 60%),
-      radial-gradient(ellipse at 80% 20%, rgba(99, 102, 241, 0.04) 0%, transparent 60%);
+      radial-gradient(ellipse at 20% 50%, rgba(0,194,240,0.04) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 20%, rgba(99,102,241,0.04) 0%, transparent 60%);
     min-height: 100vh;
+    /* Prevent overscroll on iOS */
+    overscroll-behavior: none;
   }
+
   /* Custom scrollbar */
-  ::-webkit-scrollbar { width: 6px; }
-  ::-webkit-scrollbar-track { background: hsl(var(--background)); }
-  ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }
+  ::-webkit-scrollbar       { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 2px; }
   ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
 }
 
 @layer utilities {
   .font-mono { font-family: "JetBrains Mono", "Fira Code", monospace; }
 
-  /* Glowing border for quantum key elements */
+  /* Quantum glow effects */
   .quantum-glow {
-    box-shadow: 0 0 0 1px rgba(0, 194, 240, 0.3),
-                0 0 20px rgba(0, 194, 240, 0.1);
+    box-shadow: 0 0 0 1px rgba(0,194,240,0.3),
+                0 0 20px rgba(0,194,240,0.1);
   }
   .quantum-glow-strong {
-    box-shadow: 0 0 0 1px rgba(0, 194, 240, 0.6),
-                0 0 30px rgba(0, 194, 240, 0.25);
+    box-shadow: 0 0 0 1px rgba(0,194,240,0.6),
+                0 0 30px rgba(0,194,240,0.25);
   }
 
-  /* Status indicators */
+  /* Status dots */
   .status-dot-green  { @apply inline-block w-2 h-2 rounded-full bg-emerald-400; }
   .status-dot-red    { @apply inline-block w-2 h-2 rounded-full bg-red-400; }
   .status-dot-yellow { @apply inline-block w-2 h-2 rounded-full bg-amber-400; }
 
-  /* Message bubble variants */
+  /* Message bubbles */
   .msg-mine  { @apply bg-primary/15 border border-primary/30; }
   .msg-other { @apply bg-secondary border border-border; }
-  .msg-llm   { @apply bg-violet-950/60 border border-violet-700/40; }
+
+  /* ── Mobile safe-area padding ────────────────────────────────────────────
+     Handles the iPhone home indicator and Android nav bar.
+     Applied to the message input container so it never gets hidden behind
+     the OS-level navigation bar when the keyboard is open.
+  ─────────────────────────────────────────────────────────────────────── */
+  .input-safe-area {
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 12px));
+  }
+
+  /* Fixes the full-height layout on mobile so the address bar
+     doesn't cause content to overflow */
+  .h-screen-safe {
+    height: 100vh;
+    height: 100dvh; /* dynamic viewport height — supported on iOS 15.4+ */
+  }
 }

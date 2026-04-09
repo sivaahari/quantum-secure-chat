@@ -1,6 +1,12 @@
 # backend/api/socket_events.py
 """
-Flask-SocketIO event handlers — LLM removed, pure quantum-encrypted chat.
+Flask-SocketIO event handlers.
+
+New in this version:
+  - room_joined  now includes key_history (all known key versions + hex)
+                 so rejoining users can decrypt messages from any era
+  - react_message  new event: toggle emoji reaction on a message
+  - reaction_updated  broadcast: tells all room members about new reactions
 """
 
 import uuid
@@ -16,8 +22,13 @@ from config import BB84_NUM_QUBITS, BB84_NOISE_ENABLED, BB84_DEPOLAR_PROB
 from quantum import run_bb84
 from .store  import store, KeyRecord
 
+# Allowed reaction emojis (whitelist prevents abuse)
+ALLOWED_REACTIONS = {"👍", "❤️", "😂", "🔒", "⚡"}
+
 
 def register_socket_events(socketio: SocketIO) -> None:
+
+    # ── join_room ─────────────────────────────────────────────────────────────
 
     @socketio.on("join_room")
     def on_join(data: dict):
@@ -32,12 +43,17 @@ def register_socket_events(socketio: SocketIO) -> None:
         if key_record is None:
             key_record = _generate_and_store_key(room_id, version=1)
 
+        # Send full key history so the client can decrypt messages
+        # from every previous key epoch (not just the current one)
+        key_history = store.get_key_history(room_id)
+
         emit("room_joined", {
-            "room_id":   room_id,
-            "username":  username,
-            "room_info": room.to_dict(),
-            "key_info":  key_record.to_dict() if key_record else None,
-            "history":   store.get_messages(room_id, limit=30),
+            "room_id":     room_id,
+            "username":    username,
+            "room_info":   room.to_dict(),
+            "key_info":    key_record.to_dict() if key_record else None,
+            "key_history": key_history,   # ← NEW: all versions with key_hex
+            "history":     store.get_messages(room_id, limit=50),
         })
 
         emit("user_joined", {
@@ -45,6 +61,8 @@ def register_socket_events(socketio: SocketIO) -> None:
             "username": username,
             "members":  len(room.members),
         }, to=room_id, include_self=False)
+
+    # ── leave_room ────────────────────────────────────────────────────────────
 
     @socketio.on("leave_room")
     def on_leave(data: dict):
@@ -55,17 +73,32 @@ def register_socket_events(socketio: SocketIO) -> None:
         store.leave_room(room_id, sid)
         sio_leave(room_id)
 
+        room = store.get_room(room_id)
+        member_count = len(room.members) if room else 0
+
         emit("room_left", {"room_id": room_id})
         emit("user_left", {
             "room_id":  room_id,
             "username": username,
+            "members":  member_count,
         }, to=room_id, include_self=False)
+
+    # ── disconnect ────────────────────────────────────────────────────────────
 
     @socketio.on("disconnect")
     def on_disconnect():
         sid = flask_request.sid
         for room_id in store.find_rooms_for_sid(sid):
             store.leave_room(room_id, sid)
+            room = store.get_room(room_id)
+            member_count = len(room.members) if room else 0
+            socketio.emit("user_left", {
+                "room_id":  room_id,
+                "username": "unknown",
+                "members":  member_count,
+            }, to=room_id)
+
+    # ── send_message ──────────────────────────────────────────────────────────
 
     @socketio.on("send_message")
     def on_message(data: dict):
@@ -101,6 +134,8 @@ def register_socket_events(socketio: SocketIO) -> None:
         if needs_refresh and updated_key:
             _do_key_refresh(room_id, socketio)
 
+    # ── typing ────────────────────────────────────────────────────────────────
+
     @socketio.on("typing")
     def on_typing(data: dict):
         room_id  = data.get("room_id", "default")
@@ -110,10 +145,54 @@ def register_socket_events(socketio: SocketIO) -> None:
             "username": username,
         }, to=room_id, include_self=False)
 
+    # ── react_message ─────────────────────────────────────────────────────────
+
+    @socketio.on("react_message")
+    def on_react(data: dict):
+        """
+        Toggle an emoji reaction on a message.
+
+        Expected data:
+        {
+            "room_id":    "omega-793",
+            "message_id": "uuid-...",
+            "username":   "Sivaa",
+            "emoji":      "👍"
+        }
+
+        Broadcasts reaction_updated to the whole room with the updated
+        reactions dict for that message.
+        """
+        room_id    = data.get("room_id", "default")
+        message_id = data.get("message_id", "")
+        username   = data.get("username", "anonymous")
+        emoji      = data.get("emoji", "")
+
+        # Whitelist check — ignore unknown emojis
+        if emoji not in ALLOWED_REACTIONS:
+            emit("error", {"message": f"Reaction '{emoji}' not allowed."})
+            return
+
+        updated_msg = store.add_reaction(room_id, message_id, username, emoji)
+        if updated_msg is None:
+            emit("error", {"message": "Message not found."})
+            return
+
+        # Broadcast the updated reactions to everyone in the room
+        emit("reaction_updated", {
+            "room_id":    room_id,
+            "message_id": message_id,
+            "reactions":  updated_msg["reactions"],
+        }, to=room_id)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Private helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _generate_and_store_key(room_id: str, version: int) -> KeyRecord:
-    """Use fewer qubits on Railway for faster join response."""
-    num_qubits = min(BB84_NUM_QUBITS, 128)   # cap at 128 for prod speed
+    """Run BB84 and store result. Caps qubits at 128 for prod speed."""
+    num_qubits = min(BB84_NUM_QUBITS, 128)
 
     result = run_bb84(
         num_qubits    = num_qubits,
@@ -135,17 +214,31 @@ def _generate_and_store_key(room_id: str, version: int) -> KeyRecord:
 
 
 def _do_key_refresh(room_id: str, socketio: SocketIO) -> None:
+    """
+    Generate a fresh BB84 key. The old key is automatically moved to
+    key_history by store.set_key(), preserving decrypt ability for
+    old messages.
+    """
     existing    = store.get_key(room_id)
     new_version = (existing.key_version + 1) if existing else 1
 
     try:
         new_record = _generate_and_store_key(room_id, new_version)
     except Exception as exc:
-        socketio.emit("error", {"message": f"Key refresh failed: {str(exc)}"}, to=room_id)
+        socketio.emit("error", {
+            "message": f"Key refresh failed: {str(exc)}"
+        }, to=room_id)
         return
 
+    # Send full key history so all clients update their local key maps
+    key_history = store.get_key_history(room_id)
+
     socketio.emit("key_refreshed", {
-        "room_id":  room_id,
-        "key_info": new_record.to_dict(),
-        "message":  f"🔑 Quantum key refreshed (v{new_version}) — QBER: {new_record.qber:.4f}",
+        "room_id":     room_id,
+        "key_info":    new_record.to_dict(),
+        "key_history": key_history,   # ← includes new key + all old ones
+        "message":     (
+            f"🔑 Quantum key refreshed (v{new_version}) — "
+            f"QBER: {new_record.qber:.4f}"
+        ),
     }, to=room_id)

@@ -1,19 +1,12 @@
 # backend/api/store.py
 """
-In-memory store for rooms, quantum keys, and message history.
+In-memory store for rooms, quantum keys, message history, and reactions.
 
-Architecture
-------------
-This module acts as the single source of truth for all runtime state.
-In production you would replace this with Redis; for this demo,
-a thread-safe in-memory dict is sufficient.
-
-Key concepts:
-  - Room      : A named chat channel (e.g. "room-alpha")
-  - KeyRecord : The current AES key (derived from BB84) for a room,
-                plus metadata (version, QBER, generation time)
-  - Message   : Stored as encrypted payload + metadata; never stored
-                in plaintext after initial receipt
+Changes from v1:
+  - Room.key_history  : keeps last 5 KeyRecords so old messages can be decrypted
+  - StoredMessage.reactions : {emoji: [username, ...]} for reaction feature
+  - ChatStore.get_key_by_version() : look up any historic key
+  - ChatStore.add_reaction()       : toggle a reaction on a message
 """
 
 import threading
@@ -40,13 +33,12 @@ class KeyRecord:
     qber:           float
     qber_safe:      bool
     generated_at:   float = field(default_factory=time.time)
-    messages_used:  int   = 0        # how many messages encrypted with this key
+    messages_used:  int   = 0
     bloch_vectors:  list  = field(default_factory=list)
     noise_enabled:  bool  = True
     sim_time_ms:    float = 0.0
 
     def needs_refresh(self) -> bool:
-        """True when this key has been used KEY_REFRESH_EVERY times."""
         return self.messages_used >= KEY_REFRESH_EVERY
 
     def to_dict(self) -> dict:
@@ -67,37 +59,40 @@ class KeyRecord:
 @dataclass
 class StoredMessage:
     """One chat message as stored server-side."""
-    message_id:      str
-    room_id:         str
-    sender:          str
-    encrypted_payload: dict          # EncryptedPayload.to_dict()
-    plaintext_preview: str           # first 20 chars for server logs ONLY
-    key_version:     int
-    timestamp:       float = field(default_factory=time.time)
-    is_llm_reply:    bool  = False
+    message_id:        str
+    room_id:           str
+    sender:            str
+    encrypted_payload: dict
+    plaintext_preview: str
+    key_version:       int
+    timestamp:         float = field(default_factory=time.time)
+    is_llm_reply:      bool  = False
+    # reactions: {emoji: [username, ...]}
+    reactions:         Dict[str, List[str]] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
-            "message_id":       self.message_id,
-            "room_id":          self.room_id,
-            "sender":           self.sender,
+            "message_id":        self.message_id,
+            "room_id":           self.room_id,
+            "sender":            self.sender,
             "encrypted_payload": self.encrypted_payload,
-            "key_version":      self.key_version,
-            "timestamp":        self.timestamp,
-            "is_llm_reply":     self.is_llm_reply,
-            # Never send plaintext_preview to client — server-side only
+            "key_version":       self.key_version,
+            "timestamp":         self.timestamp,
+            "is_llm_reply":      self.is_llm_reply,
+            "reactions":         self.reactions,
         }
 
 
 @dataclass
 class Room:
     """One chat room."""
-    room_id:      str
-    created_at:   float = field(default_factory=time.time)
-    members:      List[str] = field(default_factory=list)
-    messages:     List[StoredMessage] = field(default_factory=list)
-    key_record:   Optional[KeyRecord] = None
-    message_count: int = 0           # total messages ever sent in this room
+    room_id:       str
+    created_at:    float = field(default_factory=time.time)
+    members:       List[str] = field(default_factory=list)
+    messages:      List[StoredMessage] = field(default_factory=list)
+    key_record:    Optional[KeyRecord] = None
+    key_history:   List[KeyRecord] = field(default_factory=list)  # last 5 keys
+    message_count: int = 0
 
     def add_member(self, sid: str) -> None:
         if sid not in self.members:
@@ -122,14 +117,10 @@ class Room:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ChatStore:
-    """
-    Thread-safe in-memory store for all rooms and messages.
+    """Thread-safe in-memory store for all rooms and messages."""
 
-    All public methods acquire a reentrant lock — safe for Flask-SocketIO
-    with eventlet green threads.
-    """
-
-    MAX_MESSAGES_PER_ROOM = 200   # rolling window
+    MAX_MESSAGES_PER_ROOM = 200
+    MAX_KEY_HISTORY       = 5   # keep last 5 keys so old messages can decrypt
 
     def __init__(self):
         self._lock  = threading.RLock()
@@ -173,7 +164,6 @@ class ChatStore:
                 room.remove_member(sid)
 
     def find_rooms_for_sid(self, sid: str) -> List[str]:
-        """Return all room_ids that contain this socket session."""
         with self._lock:
             return [
                 rid for rid, room in self._rooms.items()
@@ -183,8 +173,19 @@ class ChatStore:
     # ── Key management ────────────────────────────────────────────────────────
 
     def set_key(self, room_id: str, key_record: KeyRecord) -> None:
+        """
+        Set the current key for a room.
+        The OLD key is moved to key_history (capped at MAX_KEY_HISTORY)
+        so messages encrypted with it can still be decrypted.
+        """
         with self._lock:
             room = self.get_or_create_room(room_id)
+            if room.key_record is not None:
+                # Save old key to history before replacing
+                room.key_history.append(room.key_record)
+                # Rolling window — keep only the most recent N keys
+                if len(room.key_history) > self.MAX_KEY_HISTORY:
+                    room.key_history = room.key_history[-self.MAX_KEY_HISTORY:]
             room.key_record = key_record
 
     def get_key(self, room_id: str) -> Optional[KeyRecord]:
@@ -192,11 +193,40 @@ class ChatStore:
             room = self.get_room(room_id)
             return room.key_record if room else None
 
+    def get_key_by_version(self, room_id: str, version: int) -> Optional[KeyRecord]:
+        """
+        Look up a specific key version — current or historical.
+        Used when a rejoining user needs to decrypt old messages.
+        """
+        with self._lock:
+            room = self.get_room(room_id)
+            if not room:
+                return None
+            # Check current key first
+            if room.key_record and room.key_record.key_version == version:
+                return room.key_record
+            # Check history
+            for kr in room.key_history:
+                if kr.key_version == version:
+                    return kr
+            return None
+
+    def get_key_history(self, room_id: str) -> List[dict]:
+        """
+        Return all key versions (current + history) as dicts for the
+        room_joined event payload. Includes key_hex so client can decrypt
+        messages from any era.
+        """
+        with self._lock:
+            room = self.get_room(room_id)
+            if not room:
+                return []
+            result = [kr.to_dict() for kr in room.key_history]
+            if room.key_record:
+                result.append(room.key_record.to_dict())
+            return result
+
     def increment_key_usage(self, room_id: str) -> Optional[KeyRecord]:
-        """
-        Increment message counter for the room's current key.
-        Returns the updated KeyRecord (caller checks needs_refresh()).
-        """
         with self._lock:
             room = self.get_room(room_id)
             if room and room.key_record:
@@ -229,24 +259,48 @@ class ChatStore:
             )
             room.messages.append(msg)
             room.message_count += 1
-
-            # Rolling window — keep only last MAX_MESSAGES_PER_ROOM
             if len(room.messages) > self.MAX_MESSAGES_PER_ROOM:
                 room.messages = room.messages[-self.MAX_MESSAGES_PER_ROOM:]
-
             return msg
 
-    def get_messages(
-        self,
-        room_id: str,
-        limit:   int = 50,
-    ) -> List[dict]:
+    def get_messages(self, room_id: str, limit: int = 50) -> List[dict]:
         with self._lock:
             room = self.get_room(room_id)
             if not room:
                 return []
-            msgs = room.messages[-limit:]
-            return [m.to_dict() for m in msgs]
+            return [m.to_dict() for m in room.messages[-limit:]]
+
+    # ── Reactions ─────────────────────────────────────────────────────────────
+
+    def add_reaction(
+        self,
+        room_id:    str,
+        message_id: str,
+        username:   str,
+        emoji:      str,
+    ) -> Optional[dict]:
+        """
+        Toggle a reaction on a message.
+        - If the user hasn't reacted with this emoji: add them
+        - If they have: remove (toggle off)
+        Returns the updated StoredMessage dict or None if not found.
+        """
+        with self._lock:
+            room = self.get_room(room_id)
+            if not room:
+                return None
+            for msg in room.messages:
+                if msg.message_id == message_id:
+                    if emoji not in msg.reactions:
+                        msg.reactions[emoji] = []
+                    if username in msg.reactions[emoji]:
+                        msg.reactions[emoji].remove(username)
+                        if not msg.reactions[emoji]:
+                            del msg.reactions[emoji]
+                    else:
+                        msg.reactions[emoji].append(username)
+                    return msg.to_dict()
+            return None
 
     # ── Stats ─────────────────────────────────────────────────────────────────
 
@@ -260,5 +314,5 @@ class ChatStore:
             }
 
 
-# Singleton instance — imported by routes and socket_events
+# Singleton
 store = ChatStore()
