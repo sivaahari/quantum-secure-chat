@@ -24,10 +24,12 @@ export function useAES(
   const importingRef = useRef(false);
 
   // ── Import any keys that are in keyHexMap but not yet in cryptoKeyMap ──────
+// frontend/src/hooks/useAES.ts
+// Replace the useEffect (the one that imports keys) with this:
+
   useEffect(() => {
     if (keyHexMap.size === 0) return;
 
-    // Find versions that need importing
     const toImport: Array<{ version: number; hex: string }> = [];
     keyHexMap.forEach((hex, version) => {
       if (hex.length === 64 && !cryptoKeyMap.has(version)) {
@@ -35,30 +37,43 @@ export function useAES(
       }
     });
 
-    if (toImport.length === 0) return;
-    if (importingRef.current) return;
+    if (toImport.length === 0) return;   // nothing new — skip entirely
+    if (importingRef.current) return;    // already importing
 
     importingRef.current = true;
 
     Promise.all(
       toImport.map(({ version, hex }) =>
-        importKeyFromHex(hex).then((key) => ({ version, key }))
+        importKeyFromHex(hex)
+          .then((key) => ({ version, key }))
+          .catch((err) => {
+            console.error(`[useAES] Failed to import key v${version}:`, err);
+            return null;
+          })
       )
     )
       .then((results) => {
+        const valid = results.filter(Boolean) as Array<{ version: number; key: CryptoKey }>;
+        if (valid.length === 0) return;
         setCryptoKeyMap((prev) => {
           const next = new Map(prev);
-          results.forEach(({ version, key }) => next.set(version, key));
+          valid.forEach(({ version, key }) => next.set(version, key));
           return next;
         });
-      })
-      .catch((err) => {
-        console.error("[useAES] Key import error:", err);
       })
       .finally(() => {
         importingRef.current = false;
       });
-  }, [keyHexMap]); // re-run whenever keyHexMap changes (new keys added)
+  // Intentionally use keyHexMap.size + a serialized key to avoid
+  // firing on every render when the Map reference changes but content doesn't
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    // Stable dependency: only re-run when the number of keys changes
+    // or when a new key version appears
+    keyHexMap.size,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    Array.from(keyHexMap.keys()).join(","),
+  ]); // re-run whenever keyHexMap changes (new keys added)
 
   // ── Encrypt using the CURRENT version ─────────────────────────────────────
   const encrypt = useCallback(

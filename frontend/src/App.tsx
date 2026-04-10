@@ -11,7 +11,7 @@
  *  4. Alice auto-initiates when Bob announces ready (handled in WebRTCManager)
  */
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { Toaster, toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge }  from "@/components/ui/badge";
@@ -85,16 +85,19 @@ export default function App() {
   const qKey = useQuantumKey(roomId);
 
   // ── Effective key map: P2P key takes priority over server key ─────────────
-  const effectiveKeyHexMap = (() => {
+  // REPLACE WITH — useMemo prevents a new Map on every render
+  const effectiveKeyHexMap = useMemo(() => {
     if (p2pKeyActive && p2pKeyHex.length === 64) {
       const m = new Map<number, string>();
+      // P2P key first
       m.set(p2pKeyVersion, p2pKeyHex);
-      // Also keep server keys so history messages still decrypt
+      // ALL server keys — critical so v1 messages still decrypt
+      // after P2P key (v1001) becomes active
       qKey.keyHexMap.forEach((hex, ver) => m.set(ver, hex));
       return m;
     }
     return qKey.keyHexMap;
-  })();
+  }, [p2pKeyActive, p2pKeyHex, p2pKeyVersion, qKey.keyHexMap]);
 
   const effectiveVersion = p2pKeyActive ? p2pKeyVersion : (qKey.keyInfo?.key_version ?? 0);
 
