@@ -72,7 +72,7 @@ export function useWebRTC({ getSocket, roomId, username, onMessage }: UseWebRTCP
     setStatus("signaling");
     const mgr = _createManager("alice");
     // Alice initiates connection immediately
-    mgr?.initiateConnection();
+    
   }, [_createManager]);
 
   // ── Bob: answer Alice's offer ────────────────────────────────────────────
