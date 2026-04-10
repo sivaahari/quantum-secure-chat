@@ -32,7 +32,7 @@ export function ChatWindow({
   const [input,   setInput]   = useState("");
   const [sending, setSending] = useState(false);
   const bottomRef             = useRef<HTMLDivElement>(null);
-  const typingTimer           = useRef<ReturnType<typeof setTimeout>>();
+  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef              = useRef<HTMLInputElement>(null);
 
   // Auto-scroll to bottom on new messages
