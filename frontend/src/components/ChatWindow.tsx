@@ -69,7 +69,9 @@ export function ChatWindow({
 
   const handleInputChange = (v: string) => {
     setInput(v);
-    clearTimeout(typingTimer.current);
+    if (typingTimer.current) {
+      clearTimeout(typingTimer.current);
+    }
     typingTimer.current = setTimeout(onTyping, 300);
   };
 
