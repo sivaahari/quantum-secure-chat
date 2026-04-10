@@ -17,42 +17,35 @@ import type {
 const SOCKET_URL = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:5000";
 
 export interface SocketCallbacks {
-  onRoomJoined?:      (payload: RoomJoinedPayload)      => void;
-  onNewMessage?:      (payload: NewMessagePayload)       => void;
-  onKeyRefreshed?:    (payload: KeyRefreshedPayload)     => void;
-  onTyping?:          (payload: TypingPayload)           => void;
-  onUserJoined?:      (payload: UserJoinedPayload)       => void;
-  onUserLeft?:        (payload: UserLeftPayload)         => void;
-  onReactionUpdated?: (payload: ReactionUpdatedPayload)  => void;
-  onError?:           (payload: { message: string })     => void;
+  onRoomJoined?:      (payload: RoomJoinedPayload)     => void;
+  onNewMessage?:      (payload: NewMessagePayload)      => void;
+  onKeyRefreshed?:    (payload: KeyRefreshedPayload)    => void;
+  onTyping?:          (payload: TypingPayload)          => void;
+  onUserJoined?:      (payload: UserJoinedPayload)      => void;
+  onUserLeft?:        (payload: UserLeftPayload)        => void;
+  onReactionUpdated?: (payload: ReactionUpdatedPayload) => void;
+  onError?:           (payload: { message: string })    => void;
 }
 
 export function useSocket(callbacks: SocketCallbacks) {
-  const socketRef    = useRef<Socket | null>(null);
-  const callbacksRef = useRef(callbacks);
-  const isConnecting = useRef(false);
-  const disconnectTime = useRef<number | null>(null); // track when we lost connection
+  const socketRef      = useRef<Socket | null>(null);
+  const callbacksRef   = useRef(callbacks);
+  const isConnecting   = useRef(false);
+  const disconnectTime = useRef<number | null>(null);
 
   const [status,   setStatus]   = useState<ConnectionStatus>("disconnected");
   const [socketId, setSocketId] = useState<string>("");
 
-  // Always keep callbacks current
   useEffect(() => { callbacksRef.current = callbacks; });
 
   // ── connect ──────────────────────────────────────────────────────────────
   const connect = useCallback(() => {
-    if (socketRef.current) {
-      console.log("[Socket] Already have socket, skipping connect()");
-      return;
-    }
-    if (isConnecting.current) {
-      console.log("[Socket] Already connecting, skipping");
-      return;
-    }
+    if (socketRef.current) return;
+    if (isConnecting.current) return;
 
     isConnecting.current = true;
     setStatus("connecting");
-    console.log("[Socket] Creating new socket →", SOCKET_URL);
+    console.log("[Socket] Creating →", SOCKET_URL);
 
     const socket = io(SOCKET_URL, {
       transports:           ["polling", "websocket"],
@@ -61,13 +54,9 @@ export function useSocket(callbacks: SocketCallbacks) {
       reconnectionDelayMax: 10000,
       reconnectionAttempts: 20,
       timeout:              15000,
-      forceNew:             false,
-      withCredentials:      false,
     });
 
     socketRef.current = socket;
-
-    // ── lifecycle ──────────────────────────────────────────────────────────
 
     socket.on("connect", () => {
       isConnecting.current = false;
@@ -75,16 +64,11 @@ export function useSocket(callbacks: SocketCallbacks) {
       setSocketId(socket.id ?? "");
       console.log("[Socket] ✅ Connected:", socket.id);
 
-      // ── Railway sleep warning ────────────────────────────────────────────
-      // Railway free tier "sleeps" the container after ~5 min of inactivity.
-      // When it wakes, the socket reconnects. If the disconnect was > 10s ago,
-      // the server likely restarted and we warn the user that state may be lost.
       if (disconnectTime.current !== null) {
-        const gapSeconds = (Date.now() - disconnectTime.current) / 1000;
-        if (gapSeconds > 10) {
+        const gap = (Date.now() - disconnectTime.current) / 1000;
+        if (gap > 10) {
           toast.warning(
-            `🌙 Server woke up after ${Math.round(gapSeconds)}s sleep. ` +
-            "Room state may have reset — regenerate your quantum key.",
+            `🌙 Server woke after ${Math.round(gap)}s — regenerate your quantum key.`,
             { duration: 8000 }
           );
         }
@@ -95,75 +79,38 @@ export function useSocket(callbacks: SocketCallbacks) {
     socket.on("disconnect", (reason) => {
       setStatus("disconnected");
       setSocketId("");
-      disconnectTime.current = Date.now();   // record when we lost connection
+      disconnectTime.current = Date.now();
       console.log("[Socket] Disconnected:", reason);
     });
 
     socket.on("connect_error", (err) => {
       isConnecting.current = false;
       setStatus("error");
-      console.error("[Socket] ❌ Connection error:", err.message);
+      console.error("[Socket] ❌ Error:", err.message);
     });
 
-    // Fires on every successful reconnection attempt
-    socket.io.on("reconnect", (attemptNumber: number) => {
-      console.log("[Socket] Reconnected after", attemptNumber, "attempt(s)");
-    });
-
-    // ── application events ─────────────────────────────────────────────────
-
-    socket.on("room_joined", (p: RoomJoinedPayload) => {
-      console.log("[Socket] 📥 room_joined →", p.room_id, p.username);
-      callbacksRef.current.onRoomJoined?.(p);
-    });
-
-    socket.on("new_message", (p: NewMessagePayload) => {
-      callbacksRef.current.onNewMessage?.(p);
-    });
-
-    socket.on("key_refreshed", (p: KeyRefreshedPayload) => {
-      console.log("[Socket] 🔑 key_refreshed → v", p.key_info.key_version);
-      callbacksRef.current.onKeyRefreshed?.(p);
-    });
-
-    socket.on("typing_indicator", (p: TypingPayload) => {
-      callbacksRef.current.onTyping?.(p);
-    });
-
-    socket.on("user_joined", (p: UserJoinedPayload) => {
-      console.log("[Socket] 👤 user_joined →", p.username);
-      callbacksRef.current.onUserJoined?.(p);
-    });
-
-    socket.on("user_left", (p: UserLeftPayload) => {
-      console.log("[Socket] 👤 user_left →", p.username);
-      callbacksRef.current.onUserLeft?.(p);
-    });
-
-    socket.on("reaction_updated", (p: ReactionUpdatedPayload) => {
-      callbacksRef.current.onReactionUpdated?.(p);
-    });
-
-    socket.on("error", (p: { message: string }) => {
-      console.error("[Socket] ⚠ Server error:", p.message);
-      callbacksRef.current.onError?.(p);
-    });
+    socket.on("room_joined",      (p) => callbacksRef.current.onRoomJoined?.(p));
+    socket.on("new_message",      (p) => callbacksRef.current.onNewMessage?.(p));
+    socket.on("key_refreshed",    (p) => callbacksRef.current.onKeyRefreshed?.(p));
+    socket.on("typing_indicator", (p) => callbacksRef.current.onTyping?.(p));
+    socket.on("user_joined",      (p) => callbacksRef.current.onUserJoined?.(p));
+    socket.on("user_left",        (p) => callbacksRef.current.onUserLeft?.(p));
+    socket.on("reaction_updated", (p) => callbacksRef.current.onReactionUpdated?.(p));
+    socket.on("error",            (p) => callbacksRef.current.onError?.(p));
   }, []);
 
-  // ── disconnect ────────────────────────────────────────────────────────────
   const disconnect = useCallback(() => {
     if (socketRef.current) {
       socketRef.current.removeAllListeners();
       socketRef.current.disconnect();
       socketRef.current = null;
     }
-    isConnecting.current = false;
+    isConnecting.current   = false;
     disconnectTime.current = null;
     setStatus("disconnected");
     setSocketId("");
   }, []);
 
-  // Cleanup on unmount only
   useEffect(() => {
     return () => {
       socketRef.current?.removeAllListeners();
@@ -172,8 +119,10 @@ export function useSocket(callbacks: SocketCallbacks) {
     };
   }, []);
 
-  // ── emit helpers ──────────────────────────────────────────────────────────
+  // ── Expose raw socket for WebRTC signaling ────────────────────────────────
+  const getSocket = useCallback((): Socket | null => socketRef.current, []);
 
+  // ── Emit helpers ──────────────────────────────────────────────────────────
   const joinRoom = useCallback((roomId: string, username: string) => {
     console.log("[Socket] 📤 join_room →", roomId, username);
     socketRef.current?.emit("join_room", { room_id: roomId, username });
@@ -184,20 +133,11 @@ export function useSocket(callbacks: SocketCallbacks) {
   }, []);
 
   const sendMessage = useCallback(
-    (
-      roomId:           string,
-      username:         string,
-      encryptedPayload: EncryptedPayload,
-      plaintext:        string,
-    ) => {
+    (roomId: string, username: string, encryptedPayload: EncryptedPayload, plaintext: string) => {
       socketRef.current?.emit("send_message", {
-        room_id:           roomId,
-        username,
-        encrypted_payload: encryptedPayload,
-        plaintext,
+        room_id: roomId, username, encrypted_payload: encryptedPayload, plaintext,
       });
-    },
-    []
+    }, []
   );
 
   const sendTyping = useCallback((roomId: string, username: string) => {
@@ -207,13 +147,9 @@ export function useSocket(callbacks: SocketCallbacks) {
   const sendReaction = useCallback(
     (roomId: string, messageId: string, username: string, emoji: string) => {
       socketRef.current?.emit("react_message", {
-        room_id:    roomId,
-        message_id: messageId,
-        username,
-        emoji,
+        room_id: roomId, message_id: messageId, username, emoji,
       });
-    },
-    []
+    }, []
   );
 
   return {
@@ -226,6 +162,7 @@ export function useSocket(callbacks: SocketCallbacks) {
     sendMessage,
     sendTyping,
     sendReaction,
+    getSocket,          // ← WebRTC uses this to access the raw Socket instance
     isConnected: status === "connected",
   };
 }

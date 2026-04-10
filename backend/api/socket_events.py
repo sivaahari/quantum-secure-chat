@@ -1,4 +1,3 @@
-# backend/api/socket_events.py
 """
 Flask-SocketIO event handlers.
 
@@ -22,13 +21,10 @@ from config import BB84_NUM_QUBITS, BB84_NOISE_ENABLED, BB84_DEPOLAR_PROB
 from quantum import run_bb84
 from .store  import store, KeyRecord
 
-# Allowed reaction emojis (whitelist prevents abuse)
 ALLOWED_REACTIONS = {"👍", "❤️", "😂", "🔒", "⚡"}
 
 
 def register_socket_events(socketio: SocketIO) -> None:
-
-    # ── join_room ─────────────────────────────────────────────────────────────
 
     @socketio.on("join_room")
     def on_join(data: dict):
@@ -43,8 +39,6 @@ def register_socket_events(socketio: SocketIO) -> None:
         if key_record is None:
             key_record = _generate_and_store_key(room_id, version=1)
 
-        # Send full key history so the client can decrypt messages
-        # from every previous key epoch (not just the current one)
         key_history = store.get_key_history(room_id)
 
         emit("room_joined", {
@@ -52,7 +46,7 @@ def register_socket_events(socketio: SocketIO) -> None:
             "username":    username,
             "room_info":   room.to_dict(),
             "key_info":    key_record.to_dict() if key_record else None,
-            "key_history": key_history,   # ← NEW: all versions with key_hex
+            "key_history": key_history,
             "history":     store.get_messages(room_id, limit=50),
         })
 
@@ -61,8 +55,6 @@ def register_socket_events(socketio: SocketIO) -> None:
             "username": username,
             "members":  len(room.members),
         }, to=room_id, include_self=False)
-
-    # ── leave_room ────────────────────────────────────────────────────────────
 
     @socketio.on("leave_room")
     def on_leave(data: dict):
@@ -83,8 +75,6 @@ def register_socket_events(socketio: SocketIO) -> None:
             "members":  member_count,
         }, to=room_id, include_self=False)
 
-    # ── disconnect ────────────────────────────────────────────────────────────
-
     @socketio.on("disconnect")
     def on_disconnect():
         sid = flask_request.sid
@@ -97,8 +87,6 @@ def register_socket_events(socketio: SocketIO) -> None:
                 "username": "unknown",
                 "members":  member_count,
             }, to=room_id)
-
-    # ── send_message ──────────────────────────────────────────────────────────
 
     @socketio.on("send_message")
     def on_message(data: dict):
@@ -134,8 +122,6 @@ def register_socket_events(socketio: SocketIO) -> None:
         if needs_refresh and updated_key:
             _do_key_refresh(room_id, socketio)
 
-    # ── typing ────────────────────────────────────────────────────────────────
-
     @socketio.on("typing")
     def on_typing(data: dict):
         room_id  = data.get("room_id", "default")
@@ -145,30 +131,35 @@ def register_socket_events(socketio: SocketIO) -> None:
             "username": username,
         }, to=room_id, include_self=False)
 
-    # ── react_message ─────────────────────────────────────────────────────────
+    # ── WebRTC signaling ─────────────────────────────────────────────
+
+    @socketio.on("webrtc_offer")
+    def on_webrtc_offer(data: dict):
+        room_id = data.get("room_id", "default")
+        emit("webrtc_offer", data, to=room_id, include_self=False)
+
+    @socketio.on("webrtc_answer")
+    def on_webrtc_answer(data: dict):
+        room_id = data.get("room_id", "default")
+        emit("webrtc_answer", data, to=room_id, include_self=False)
+
+    @socketio.on("webrtc_ice")
+    def on_webrtc_ice(data: dict):
+        room_id = data.get("room_id", "default")
+        emit("webrtc_ice", data, to=room_id, include_self=False)
+
+    @socketio.on("webrtc_ready")
+    def on_webrtc_ready(data: dict):
+        room_id = data.get("room_id", "default")
+        emit("webrtc_peer_ready", data, to=room_id, include_self=False)
 
     @socketio.on("react_message")
     def on_react(data: dict):
-        """
-        Toggle an emoji reaction on a message.
-
-        Expected data:
-        {
-            "room_id":    "omega-793",
-            "message_id": "uuid-...",
-            "username":   "Sivaa",
-            "emoji":      "👍"
-        }
-
-        Broadcasts reaction_updated to the whole room with the updated
-        reactions dict for that message.
-        """
         room_id    = data.get("room_id", "default")
         message_id = data.get("message_id", "")
         username   = data.get("username", "anonymous")
         emoji      = data.get("emoji", "")
 
-        # Whitelist check — ignore unknown emojis
         if emoji not in ALLOWED_REACTIONS:
             emit("error", {"message": f"Reaction '{emoji}' not allowed."})
             return
@@ -178,7 +169,6 @@ def register_socket_events(socketio: SocketIO) -> None:
             emit("error", {"message": "Message not found."})
             return
 
-        # Broadcast the updated reactions to everyone in the room
         emit("reaction_updated", {
             "room_id":    room_id,
             "message_id": message_id,
@@ -186,12 +176,7 @@ def register_socket_events(socketio: SocketIO) -> None:
         }, to=room_id)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Private helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
 def _generate_and_store_key(room_id: str, version: int) -> KeyRecord:
-    """Run BB84 and store result. Caps qubits at 128 for prod speed."""
     num_qubits = min(BB84_NUM_QUBITS, 128)
 
     result = run_bb84(
@@ -214,11 +199,6 @@ def _generate_and_store_key(room_id: str, version: int) -> KeyRecord:
 
 
 def _do_key_refresh(room_id: str, socketio: SocketIO) -> None:
-    """
-    Generate a fresh BB84 key. The old key is automatically moved to
-    key_history by store.set_key(), preserving decrypt ability for
-    old messages.
-    """
     existing    = store.get_key(room_id)
     new_version = (existing.key_version + 1) if existing else 1
 
@@ -230,14 +210,13 @@ def _do_key_refresh(room_id: str, socketio: SocketIO) -> None:
         }, to=room_id)
         return
 
-    # Send full key history so all clients update their local key maps
     key_history = store.get_key_history(room_id)
 
     socketio.emit("key_refreshed", {
         "room_id":     room_id,
         "key_info":    new_record.to_dict(),
-        "key_history": key_history,   # ← includes new key + all old ones
-        "message":     (
+        "key_history": key_history,
+        "message": (
             f"🔑 Quantum key refreshed (v{new_version}) — "
             f"QBER: {new_record.qber:.4f}"
         ),
