@@ -291,7 +291,7 @@ export default function App() {
             memberCount={memberCount}
             hasKey={hasAnyKey}
             keyVersion={keyVersion}
-            retryKey={aes.keyCount}   {/* ← THE KEY FIX: triggers retry on all bubbles */}
+            retryKey={aes.keyCount}  
             onSend={handleSend}
             onTyping={handleTypingEmit}
             onReact={handleReact}
