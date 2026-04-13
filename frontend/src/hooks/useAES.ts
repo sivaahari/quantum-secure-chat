@@ -2,13 +2,12 @@
 /**
  * Manages a MAP of CryptoKey objects, one per BB84 key version.
  *
- * Key change from v1:
- *   v1: single CryptoKey — can only decrypt messages from the CURRENT key
- *   v2: Map<version, CryptoKey> — can decrypt ANY message regardless of which
- *       key version was used to encrypt it
- *
- * decrypt(payload) looks up payload.key_version in the map, so old messages
- * always decrypt correctly even after a key refresh.
+ * Critical fix (v4):
+ *  - keyHexMapRef is updated SYNCHRONOUSLY during render (not in useEffect).
+ *    This ensures importKeyOnDemand always sees the latest hex map even when
+ *    called immediately after state updates (e.g. during room_joined handling).
+ *  - Exports a `keyCount` number so MessageBubble can re-trigger decryption
+ *    when new keys become available (retry mechanism).
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -16,112 +15,142 @@ import { importKeyFromHex, encryptMessage, safeDecrypt } from "@/lib/aes";
 import type { EncryptedPayload } from "@/types";
 
 export function useAES(
-  keyHexMap:      Map<number, string>,   // version → hex (all known keys)
-  currentVersion: number,                // which version to USE for encryption
+  keyHexMap:      Map<number, string>,
+  currentVersion: number,
 ) {
-  // Map of version → imported CryptoKey
   const [cryptoKeyMap, setCryptoKeyMap] = useState<Map<number, CryptoKey>>(new Map());
-  const importingRef = useRef(false);
 
-  // ── Import any keys that are in keyHexMap but not yet in cryptoKeyMap ──────
-// frontend/src/hooks/useAES.ts
-// Replace the useEffect (the one that imports keys) with this:
+  // ── SYNCHRONOUS ref update (not in useEffect) ─────────────────────────────
+  // By assigning during render (before any child useEffects run), we guarantee
+  // importKeyOnDemand always reads the current hex map even if called
+  // immediately in the same render cycle that added new keys.
+  const keyHexMapRef     = useRef<Map<number, string>>(keyHexMap);
+  keyHexMapRef.current   = keyHexMap;   // ← sync, every render
 
+  const cryptoKeyMapRef  = useRef<Map<number, CryptoKey>>(cryptoKeyMap);
+  cryptoKeyMapRef.current = cryptoKeyMap; // ← sync, every render
+
+  const inProgressRef    = useRef<Set<number>>(new Set());
+
+  // ── Background batch import ───────────────────────────────────────────────
   useEffect(() => {
-    if (keyHexMap.size === 0) return;
-
     const toImport: Array<{ version: number; hex: string }> = [];
+
     keyHexMap.forEach((hex, version) => {
-      if (hex.length === 64 && !cryptoKeyMap.has(version)) {
+      if (
+        hex.length === 64 &&
+        !cryptoKeyMap.has(version) &&
+        !inProgressRef.current.has(version)
+      ) {
         toImport.push({ version, hex });
       }
     });
 
-    if (toImport.length === 0) return;   // nothing new — skip entirely
-    if (importingRef.current) return;    // already importing
+    if (toImport.length === 0) return;
 
-    importingRef.current = true;
+    toImport.forEach(({ version }) => inProgressRef.current.add(version));
 
     Promise.all(
       toImport.map(({ version, hex }) =>
         importKeyFromHex(hex)
           .then((key) => ({ version, key }))
           .catch((err) => {
-            console.error(`[useAES] Failed to import key v${version}:`, err);
+            console.error(`[useAES] batch import failed v${version}:`, err);
+            inProgressRef.current.delete(version);
             return null;
           })
       )
-    )
-      .then((results) => {
-        const valid = results.filter(Boolean) as Array<{ version: number; key: CryptoKey }>;
-        if (valid.length === 0) return;
-        setCryptoKeyMap((prev) => {
-          const next = new Map(prev);
-          valid.forEach(({ version, key }) => next.set(version, key));
-          return next;
+    ).then((results) => {
+      const valid = results.filter(Boolean) as Array<{ version: number; key: CryptoKey }>;
+      if (valid.length === 0) return;
+
+      setCryptoKeyMap((prev) => {
+        const next = new Map(prev);
+        valid.forEach(({ version, key }) => {
+          next.set(version, key);
+          inProgressRef.current.delete(version);
         });
-      })
-      .finally(() => {
-        importingRef.current = false;
+        return next;
       });
-  // Intentionally use keyHexMap.size + a serialized key to avoid
-  // firing on every render when the Map reference changes but content doesn't
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    // Stable dependency: only re-run when the number of keys changes
-    // or when a new key version appears
-    keyHexMap.size,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    Array.from(keyHexMap.keys()).join(","),
-  ]); // re-run whenever keyHexMap changes (new keys added)
+    });
+  }); // intentionally no dep array — idempotent, guarded by inProgressRef
 
-  // ── Encrypt using the CURRENT version ─────────────────────────────────────
-  const encrypt = useCallback(
-    async (plaintext: string): Promise<EncryptedPayload | null> => {
-      const key = cryptoKeyMap.get(currentVersion);
-      if (!key) {
-        console.warn("[useAES] No CryptoKey for version", currentVersion);
-        return null;
-      }
-      try {
-        return await encryptMessage(key, plaintext, currentVersion);
-      } catch (err) {
-        console.error("[useAES] Encrypt error:", err);
-        return null;
-      }
-    },
-    [cryptoKeyMap, currentVersion]
-  );
+  // ── On-demand import (called from decrypt when key not in map yet) ─────────
+  const importKeyOnDemand = useCallback(async (version: number): Promise<CryptoKey | null> => {
+    // Already imported (check live ref, not stale closure)
+    const existing = cryptoKeyMapRef.current.get(version);
+    if (existing) return existing;
 
-  // ── Decrypt using the VERSION stored in the payload ────────────────────────
-  // This is the core fix: we look up the right key by payload.key_version,
-  // not by currentVersion. So a message from key v1 decrypts even after
-  // the room has moved to key v2 or v3.
-  const decrypt = useCallback(
-    async (payload: EncryptedPayload): Promise<string> => {
-      const key = cryptoKeyMap.get(payload.key_version) ?? null;
+    // Have the hex? (check live ref — updated synchronously above)
+    const hex = keyHexMapRef.current.get(version);
+    if (!hex || hex.length !== 64) {
+      console.warn(`[useAES] No hex for v${version}. Available:`, [...keyHexMapRef.current.keys()]);
+      return null;
+    }
 
-      if (!key) {
-        // Key not yet imported or version unknown
-        const knownVersions = Array.from(cryptoKeyMap.keys()).join(", ");
-        return (
-          `⚠ No key for version v${payload.key_version}. ` +
-          `Known: [${knownVersions || "none"}]. ` +
-          "Rejoin the room to load key history."
-        );
-      }
+    try {
+      const key = await importKeyFromHex(hex);
+      // Persist into state and live ref immediately
+      setCryptoKeyMap((prev) => {
+        const next = new Map(prev);
+        next.set(version, key);
+        return next;
+      });
+      cryptoKeyMapRef.current.set(version, key);
+      return key;
+    } catch (err) {
+      console.error(`[useAES] on-demand import failed v${version}:`, err);
+      return null;
+    }
+  }, []);
 
-      const { text, error } = await safeDecrypt(key, payload);
-      return text ?? error ?? "⚠ Decryption failed";
-    },
-    [cryptoKeyMap]
-  );
+  // ── Encrypt ───────────────────────────────────────────────────────────────
+  const encrypt = useCallback(async (plaintext: string): Promise<EncryptedPayload | null> => {
+    let key = cryptoKeyMapRef.current.get(currentVersion) ?? null;
+    if (!key) key = await importKeyOnDemand(currentVersion);
+    if (!key) {
+      console.warn("[useAES] encrypt: no key for v", currentVersion);
+      return null;
+    }
+    try {
+      return await encryptMessage(key, plaintext, currentVersion);
+    } catch (err) {
+      console.error("[useAES] encrypt error:", err);
+      return null;
+    }
+  }, [currentVersion, importKeyOnDemand]);
+
+  // ── Decrypt ───────────────────────────────────────────────────────────────
+  const decrypt = useCallback(async (payload: EncryptedPayload): Promise<string> => {
+    const ver = payload.key_version;
+
+    let key = cryptoKeyMapRef.current.get(ver) ?? null;
+    if (!key) key = await importKeyOnDemand(ver);
+
+    if (!key) {
+      const known  = [...cryptoKeyMapRef.current.keys()].join(", ");
+      const hasHex = keyHexMapRef.current.has(ver);
+      console.warn(`[useAES] decrypt: no key v${ver}. known=[${known}] hasHex=${hasHex}`);
+      return (
+        `⚠ No key for v${ver}. ` +
+        (hasHex
+          ? "Import failed — check console."
+          : `Known: [${known || "none"}]. Rejoin to load history.`)
+      );
+    }
+
+    const { text, error } = await safeDecrypt(key, payload);
+    return text ?? error ?? "⚠ Decryption failed";
+  }, [importKeyOnDemand]);
 
   return {
     cryptoKeyMap,
     encrypt,
     decrypt,
-    ready:         cryptoKeyMap.has(currentVersion),
-    knownVersions: Array.from(cryptoKeyMap.keys()),
+    // keyCount changes whenever a new key is imported → MessageBubble uses
+    // this as a dependency to retry failed decryptions automatically
+    keyCount: cryptoKeyMap.size,
+    ready:    cryptoKeyMap.has(currentVersion),
+    knownVersions: [...cryptoKeyMap.keys()],
   };
 }
