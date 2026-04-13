@@ -33,7 +33,7 @@ export function ChatWindow({
   const [sending, setSending] = useState(false);
   const bottomRef             = useRef<HTMLDivElement>(null);
   const inputRef              = useRef<HTMLInputElement>(null);
-  const typingTimer           = useRef<ReturnType<typeof setTimeout>>();
+  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -67,7 +67,9 @@ export function ChatWindow({
 
   const handleInputChange = (v: string) => {
     setInput(v);
-    clearTimeout(typingTimer.current);
+    if (typingTimer.current !== null) {
+      clearTimeout(typingTimer.current);
+    }
     typingTimer.current = setTimeout(onTyping, 300);
   };
 
