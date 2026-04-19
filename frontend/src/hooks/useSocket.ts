@@ -161,7 +161,6 @@ export function useSocket(callbacks: SocketCallbacks) {
     leaveRoom,
     sendMessage,
     sendTyping,
-    connect,
     sendReaction,
     getSocket,          // ← WebRTC uses this to access the raw Socket instance
     isConnected: status === "connected",
