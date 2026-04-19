@@ -39,13 +39,12 @@ export function useSocket(callbacks: SocketCallbacks) {
   useEffect(() => { callbacksRef.current = callbacks; });
 
   // ── connect ──────────────────────────────────────────────────────────────
-  const connect = useCallback(() => {
+  const connect = useCallback((token: string) => {   // ← add token param
     if (socketRef.current) return;
     if (isConnecting.current) return;
 
     isConnecting.current = true;
     setStatus("connecting");
-    console.log("[Socket] Creating →", SOCKET_URL);
 
     const socket = io(SOCKET_URL, {
       transports:           ["polling", "websocket"],
@@ -54,6 +53,7 @@ export function useSocket(callbacks: SocketCallbacks) {
       reconnectionDelayMax: 10000,
       reconnectionAttempts: 20,
       timeout:              15000,
+      auth: { token },      // ← JWT passed here — verified in on_connect
     });
 
     socketRef.current = socket;
@@ -161,6 +161,7 @@ export function useSocket(callbacks: SocketCallbacks) {
     leaveRoom,
     sendMessage,
     sendTyping,
+    connect,
     sendReaction,
     getSocket,          // ← WebRTC uses this to access the raw Socket instance
     isConnected: status === "connected",

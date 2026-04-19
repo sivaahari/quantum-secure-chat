@@ -1,0 +1,15 @@
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/.env
+frontend/
+frontend/node_modules/
+frontend/dist/
+docs/
+*.md
+.git/
+.gitignore
+nixpacks.toml
+railway.json
+runtime.txt

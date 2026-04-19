@@ -13,6 +13,10 @@ PORT        = int(os.getenv("PORT", 5000))
 # ── CORS ──────────────────────────────────────────────────────────────────────
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 
+# ── JWT ───────────────────────────────────────────────────────────────────────
+JWT_SECRET       = os.getenv("JWT_SECRET", "jwt-secret-change-in-prod")
+JWT_EXPIRY_HOURS = float(os.getenv("JWT_EXPIRY_HOURS", 24))
+
 # ── Quantum BB84 ──────────────────────────────────────────────────────────────
 BB84_NUM_QUBITS     = int(os.getenv("BB84_NUM_QUBITS", 256))
 BB84_NOISE_ENABLED  = os.getenv("BB84_NOISE", "true").lower() == "true"
@@ -25,5 +29,5 @@ AES_KEY_BYTES   = 32
 AES_NONCE_BYTES = 12
 
 # ── SocketIO ──────────────────────────────────────────────────────────────────
-SOCKETIO_ASYNC_MODE = "gevent"
-MAX_ROOMS           = int(os.getenv("MAX_ROOMS", 10))
+SOCKETIO_ASYNC_MODE = "threading"
+MAX_ROOMS           = int(os.getenv("MAX_ROOMS", 50))
