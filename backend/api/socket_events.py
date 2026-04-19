@@ -1,11 +1,14 @@
+# backend/api/socket_events.py
 """
 Flask-SocketIO event handlers.
 
-New in this version:
-  - room_joined  now includes key_history (all known key versions + hex)
-                 so rejoining users can decrypt messages from any era
-  - react_message  new event: toggle emoji reaction on a message
-  - reaction_updated  broadcast: tells all room members about new reactions
+Key fix (key-refresh sync bug):
+  Previously: stored message.key_version = server's CURRENT key version
+  After key refresh, server had v2 but client sent payload encrypted with v1001 (P2P).
+  Message was tagged as v2 → receiver tried to decrypt with v2 → failed.
+
+  Fix: use the key_version embedded in the encrypted_payload itself.
+  The payload knows which key was used to encrypt it. Trust that.
 """
 
 import uuid
@@ -21,6 +24,7 @@ from config import BB84_NUM_QUBITS, BB84_NOISE_ENABLED, BB84_DEPOLAR_PROB
 from quantum import run_bb84
 from .store  import store, KeyRecord
 
+# Allowed reaction emojis
 ALLOWED_REACTIONS = {"👍", "❤️", "😂", "🔒", "⚡"}
 
 
@@ -65,7 +69,7 @@ def register_socket_events(socketio: SocketIO) -> None:
         store.leave_room(room_id, sid)
         sio_leave(room_id)
 
-        room = store.get_room(room_id)
+        room         = store.get_room(room_id)
         member_count = len(room.members) if room else 0
 
         emit("room_left", {"room_id": room_id})
@@ -80,7 +84,7 @@ def register_socket_events(socketio: SocketIO) -> None:
         sid = flask_request.sid
         for room_id in store.find_rooms_for_sid(sid):
             store.leave_room(room_id, sid)
-            room = store.get_room(room_id)
+            room         = store.get_room(room_id)
             member_count = len(room.members) if room else 0
             socketio.emit("user_left", {
                 "room_id":  room_id,
@@ -100,6 +104,22 @@ def register_socket_events(socketio: SocketIO) -> None:
             emit("error", {"message": "No key for this room. Generate a quantum key first."})
             return
 
+        # ── KEY FIX ────────────────────────────────────────────────────────
+        # Use the key_version from the encrypted_payload, NOT the server's
+        # current key version. The payload knows which key encrypted it.
+        #
+        # Example of what was broken:
+        #   Server key = v2 (just refreshed)
+        #   Client encrypted with P2P key v1001
+        #   Old code: tag message as v2 → receiver tries v2 → decrypt fails
+        #   New code: tag message as v1001 → receiver uses v1001 → works ✅
+        #
+        # Fallback to server's current version only if payload has no version.
+        payload_key_version = int(
+            encrypted_payload.get("key_version", key_record.key_version)
+        )
+        # ───────────────────────────────────────────────────────────────────
+
         msg_id = str(uuid.uuid4())
         stored = store.add_message(
             room_id           = room_id,
@@ -107,10 +127,11 @@ def register_socket_events(socketio: SocketIO) -> None:
             sender            = username,
             encrypted_payload = encrypted_payload,
             plaintext_preview = plaintext[:20],
-            key_version       = key_record.key_version,
+            key_version       = payload_key_version,  # ← fixed
             is_llm_reply      = False,
         )
 
+        # Increment server-side message counter (for auto key refresh timing)
         updated_key   = store.increment_key_usage(room_id)
         needs_refresh = updated_key.needs_refresh() if updated_key else False
 
@@ -130,28 +151,6 @@ def register_socket_events(socketio: SocketIO) -> None:
             "room_id":  room_id,
             "username": username,
         }, to=room_id, include_self=False)
-
-    # ── WebRTC signaling ─────────────────────────────────────────────
-
-    @socketio.on("webrtc_offer")
-    def on_webrtc_offer(data: dict):
-        room_id = data.get("room_id", "default")
-        emit("webrtc_offer", data, to=room_id, include_self=False)
-
-    @socketio.on("webrtc_answer")
-    def on_webrtc_answer(data: dict):
-        room_id = data.get("room_id", "default")
-        emit("webrtc_answer", data, to=room_id, include_self=False)
-
-    @socketio.on("webrtc_ice")
-    def on_webrtc_ice(data: dict):
-        room_id = data.get("room_id", "default")
-        emit("webrtc_ice", data, to=room_id, include_self=False)
-
-    @socketio.on("webrtc_ready")
-    def on_webrtc_ready(data: dict):
-        room_id = data.get("room_id", "default")
-        emit("webrtc_peer_ready", data, to=room_id, include_self=False)
 
     @socketio.on("react_message")
     def on_react(data: dict):
@@ -175,11 +174,36 @@ def register_socket_events(socketio: SocketIO) -> None:
             "reactions":  updated_msg["reactions"],
         }, to=room_id)
 
+    # ── WebRTC signaling (pure relay — server never sees key material) ────────
+
+    @socketio.on("webrtc_offer")
+    def on_webrtc_offer(data: dict):
+        room_id = data.get("room_id", "default")
+        emit("webrtc_offer", data, to=room_id, include_self=False)
+
+    @socketio.on("webrtc_answer")
+    def on_webrtc_answer(data: dict):
+        room_id = data.get("room_id", "default")
+        emit("webrtc_answer", data, to=room_id, include_self=False)
+
+    @socketio.on("webrtc_ice")
+    def on_webrtc_ice(data: dict):
+        room_id = data.get("room_id", "default")
+        emit("webrtc_ice", data, to=room_id, include_self=False)
+
+    @socketio.on("webrtc_ready")
+    def on_webrtc_ready(data: dict):
+        room_id = data.get("room_id", "default")
+        emit("webrtc_peer_ready", data, to=room_id, include_self=False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _generate_and_store_key(room_id: str, version: int) -> KeyRecord:
     num_qubits = min(BB84_NUM_QUBITS, 128)
-
-    result = run_bb84(
+    result     = run_bb84(
         num_qubits    = num_qubits,
         noise_enabled = BB84_NOISE_ENABLED,
         depolar_prob  = BB84_DEPOLAR_PROB,
@@ -199,6 +223,11 @@ def _generate_and_store_key(room_id: str, version: int) -> KeyRecord:
 
 
 def _do_key_refresh(room_id: str, socketio: SocketIO) -> None:
+    """
+    Generate a fresh BB84 key. Old key saved to history automatically
+    by store.set_key(). Broadcasts key_refreshed with full key history
+    so all clients can decrypt messages from any previous key version.
+    """
     existing    = store.get_key(room_id)
     new_version = (existing.key_version + 1) if existing else 1
 
@@ -216,7 +245,7 @@ def _do_key_refresh(room_id: str, socketio: SocketIO) -> None:
         "room_id":     room_id,
         "key_info":    new_record.to_dict(),
         "key_history": key_history,
-        "message": (
+        "message":     (
             f"🔑 Quantum key refreshed (v{new_version}) — "
             f"QBER: {new_record.qber:.4f}"
         ),
