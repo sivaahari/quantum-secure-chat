@@ -3,6 +3,10 @@ import path from "path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+// In Docker Compose the backend is reachable via the service name, not localhost.
+// Set BACKEND_HOST=http://backend:5000 in the container environment to override.
+const BACKEND = process.env.BACKEND_HOST ?? "http://localhost:5000";
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -13,14 +17,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // Proxy REST calls to Flask
       "/api": {
-        target: "http://localhost:5000",
+        target: BACKEND,
         changeOrigin: true,
       },
-      // Proxy SocketIO upgrade
       "/socket.io": {
-        target: "http://localhost:5000",
+        target: BACKEND,
         changeOrigin: true,
         ws: true,
       },
