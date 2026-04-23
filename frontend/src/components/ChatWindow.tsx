@@ -16,10 +16,12 @@ interface ChatWindowProps {
   memberCount: number;
   hasKey:      boolean;
   keyVersion:  number;
-  retryKey:    number;    // ← NEW: aes.keyCount — triggers retry on all bubbles
+  retryKey:    number;
   onSend:      (plaintext: string, encrypted: EncryptedPayload) => void;
   onTyping:    () => void;
   onReact:     (messageId: string, emoji: string) => void;
+  onDelete:    (messageId: string) => void;
+  onEdit:      (messageId: string, newText: string) => void;
   decrypt:     (payload: EncryptedPayload) => Promise<string>;
   encrypt:     (text: string) => Promise<EncryptedPayload | null>;
 }
@@ -27,7 +29,7 @@ interface ChatWindowProps {
 export function ChatWindow({
   roomId, username, messages, typingUsers, memberCount,
   hasKey, keyVersion, retryKey,
-  onSend, onTyping, onReact, decrypt, encrypt,
+  onSend, onTyping, onReact, onDelete, onEdit, decrypt, encrypt,
 }: ChatWindowProps) {
   const [input,   setInput]   = useState("");
   const [sending, setSending] = useState(false);
@@ -117,9 +119,11 @@ export function ChatWindow({
                 message={msg}
                 isMine={msg.sender === username}
                 username={username}
-                retryKey={retryKey}   // ← passed through to each bubble
+                retryKey={retryKey}
                 decrypt={decrypt}
                 onReact={onReact}
+                onDelete={onDelete}
+                onEdit={onEdit}
               />
             ))}
           </div>
@@ -174,7 +178,7 @@ export function ChatWindow({
           </Button>
         </div>
         <p className="text-[10px] text-slate-600 mt-1.5">
-          Click message to toggle view · Right-click to react
+          Click message to toggle view · Right-click to react / edit / delete
         </p>
       </div>
     </div>

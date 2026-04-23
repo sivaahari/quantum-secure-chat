@@ -69,6 +69,10 @@ export interface ChatMessage {
   timestamp:           number;
   is_llm_reply:        boolean;
   reactions:           Reactions;
+  read_by?:            Record<string, number>;  // username → unix ms
+  deleted?:            boolean;
+  edited?:             boolean;
+  edited_at?:          number;
   key_refresh_needed?: boolean;
   // Derived client-side:
   decrypted_text?:     string;
@@ -127,6 +131,24 @@ export interface ReactionUpdatedPayload {
   room_id:    string;
   message_id: string;
   reactions:  Reactions;
+}
+
+export interface MessageReadPayload {
+  room_id:    string;
+  message_id: string;
+  read_by:    Record<string, number>;  // username → unix ms
+}
+
+export interface MessageDeletedPayload {
+  room_id:    string;
+  message_id: string;
+}
+
+export interface MessageEditedPayload {
+  room_id:           string;
+  message_id:        string;
+  encrypted_payload: EncryptedPayload;
+  edited_at:         number;
 }
 
 // ── Connection state ───────────────────────────────────────────────────────────

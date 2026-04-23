@@ -228,6 +228,76 @@ def register_socket_events(socketio: SocketIO) -> None:
             "reactions":  updated["reactions"],
         }, to=room_id)
 
+    # ── delete_message ───────────────────────────────────────────────────────
+
+    @socketio.on("delete_message")
+    def on_delete_message(data: dict):
+        sid  = flask_request.sid
+        auth = _authenticated.get(sid)
+        if not auth:
+            return
+
+        room_id    = data.get("room_id", "")
+        message_id = data.get("message_id", "")
+
+        updated = store.delete_message(
+            room_id, message_id, auth["username"], auth["role"] == "admin"
+        )
+        if updated:
+            emit("message_deleted", {
+                "room_id":    room_id,
+                "message_id": message_id,
+            }, to=room_id)
+        else:
+            emit("error", {"message": "Cannot delete that message."})
+
+    # ── edit_message ──────────────────────────────────────────────────────────
+
+    @socketio.on("edit_message")
+    def on_edit_message(data: dict):
+        sid  = flask_request.sid
+        auth = _authenticated.get(sid)
+        if not auth:
+            return
+
+        room_id           = data.get("room_id", "")
+        message_id        = data.get("message_id", "")
+        encrypted_payload = data.get("encrypted_payload", {})
+
+        updated = store.edit_message(
+            room_id, message_id, encrypted_payload, auth["username"]
+        )
+        if updated:
+            emit("message_edited", {
+                "room_id":           room_id,
+                "message_id":        message_id,
+                "encrypted_payload": updated["encrypted_payload"],
+                "edited_at":         updated["edited_at"],
+            }, to=room_id)
+        else:
+            emit("error", {"message": "Cannot edit that message."})
+
+    # ── mark_read ─────────────────────────────────────────────────────────────
+
+    @socketio.on("mark_read")
+    def on_mark_read(data: dict):
+        sid  = flask_request.sid
+        auth = _authenticated.get(sid)
+        if not auth:
+            return
+
+        room_id    = data.get("room_id", "")
+        message_id = data.get("message_id", "")
+        username   = auth["username"]
+
+        updated = store.mark_read(room_id, message_id, username)
+        if updated:
+            emit("message_read", {
+                "room_id":    room_id,
+                "message_id": message_id,
+                "read_by":    updated["read_by"],
+            }, to=room_id)
+
     # ── WebRTC signaling ──────────────────────────────────────────────────────
 
     @socketio.on("webrtc_offer")

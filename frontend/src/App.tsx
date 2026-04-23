@@ -23,7 +23,9 @@ import { useP2PKey }     from "@/hooks/useP2PKey";
 import type {
   ChatMessage, RoomJoinedPayload, NewMessagePayload,
   KeyRefreshedPayload, TypingPayload, UserJoinedPayload,
-  UserLeftPayload, ReactionUpdatedPayload, EncryptedPayload,
+  UserLeftPayload, ReactionUpdatedPayload, MessageReadPayload,
+  MessageDeletedPayload, MessageEditedPayload,
+  EncryptedPayload,
 } from "@/types";
 import type { P2PRole, P2PMessageType } from "@/lib/webrtc";
 
@@ -92,8 +94,43 @@ export default function App() {
       if (prev.some((m) => m.message_id === payload.message_id)) return prev;
       return [...prev, payload];
     });
-    if (document.hidden) setUnreadCount((c) => c + 1);
+    if (document.hidden) {
+      setUnreadCount((c) => c + 1);
+    } else {
+      // Tab is visible — mark as read immediately
+      socket.markRead(roomId, payload.message_id);
+    }
     if (payload.key_refresh_needed) toast.info("🔑 Key refresh triggered…");
+  }, [roomId]); // eslint-disable-line
+
+  const handleMessageRead = useCallback((payload: MessageReadPayload) => {
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.message_id === payload.message_id
+          ? { ...msg, read_by: payload.read_by }
+          : msg
+      )
+    );
+  }, []);
+
+  const handleMessageDeleted = useCallback((payload: MessageDeletedPayload) => {
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.message_id === payload.message_id
+          ? { ...msg, deleted: true, encrypted_payload: { nonce_b64: "", ciphertext_b64: "", timestamp: 0, key_version: 0 } }
+          : msg
+      )
+    );
+  }, []);
+
+  const handleMessageEdited = useCallback((payload: MessageEditedPayload) => {
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.message_id === payload.message_id
+          ? { ...msg, encrypted_payload: payload.encrypted_payload, edited: true, edited_at: payload.edited_at, decrypted_text: undefined }
+          : msg
+      )
+    );
   }, []);
 
   const handleKeyRefreshed = useCallback((payload: KeyRefreshedPayload) => {
@@ -136,6 +173,9 @@ export default function App() {
     onUserJoined:      handleUserJoined,
     onUserLeft:        handleUserLeft,
     onReactionUpdated: handleReactionUpdated,
+    onMessageRead:     handleMessageRead,
+    onMessageDeleted:  handleMessageDeleted,
+    onMessageEdited:   handleMessageEdited,
     onError:           (p) => toast.error(`⚠ ${p.message}`),
   });
 
@@ -202,6 +242,15 @@ export default function App() {
   const handleReact = useCallback((messageId: string, emoji: string) => {
     socket.sendReaction(roomId, messageId, auth.user?.username ?? "", emoji);
   }, [socket, roomId, auth.user]);
+
+  const handleDelete = useCallback((messageId: string) => {
+    socket.deleteMessage(roomId, messageId);
+  }, [socket, roomId]);
+
+  const handleEdit = useCallback(async (messageId: string, newText: string) => {
+    const payload = await aes.encrypt(newText);
+    if (payload) socket.editMessage(roomId, messageId, payload);
+  }, [socket, roomId, aes]);
 
   const handleGenerate = useCallback(async (opts: Parameters<typeof qKey.generate>[0]) => {
     await qKey.generate(opts); setActiveTab("chat");
@@ -371,6 +420,7 @@ export default function App() {
             typingUsers={typingUsers} memberCount={memberCount} hasKey={hasAnyKey}
             keyVersion={keyVersion} retryKey={aes.keyCount}
             onSend={handleSend} onTyping={handleTypingEmit} onReact={handleReact}
+            onDelete={handleDelete} onEdit={handleEdit}
             decrypt={decrypt} encrypt={aes.encrypt} />
         </TabsContent>
         <TabsContent value="p2p" className="flex-1 overflow-auto m-0 p-0 data-[state=inactive]:hidden">

@@ -11,6 +11,9 @@ import type {
   UserJoinedPayload,
   UserLeftPayload,
   ReactionUpdatedPayload,
+  MessageReadPayload,
+  MessageDeletedPayload,
+  MessageEditedPayload,
   EncryptedPayload,
 } from "@/types";
 
@@ -24,6 +27,9 @@ export interface SocketCallbacks {
   onUserJoined?:      (payload: UserJoinedPayload)      => void;
   onUserLeft?:        (payload: UserLeftPayload)        => void;
   onReactionUpdated?: (payload: ReactionUpdatedPayload) => void;
+  onMessageRead?:     (payload: MessageReadPayload)     => void;
+  onMessageDeleted?:  (payload: MessageDeletedPayload)  => void;
+  onMessageEdited?:   (payload: MessageEditedPayload)   => void;
   onError?:           (payload: { message: string })    => void;
 }
 
@@ -96,7 +102,10 @@ export function useSocket(callbacks: SocketCallbacks) {
     socket.on("user_joined",      (p) => callbacksRef.current.onUserJoined?.(p));
     socket.on("user_left",        (p) => callbacksRef.current.onUserLeft?.(p));
     socket.on("reaction_updated", (p) => callbacksRef.current.onReactionUpdated?.(p));
-    socket.on("error",            (p) => callbacksRef.current.onError?.(p));
+    socket.on("message_read",    (p) => callbacksRef.current.onMessageRead?.(p));
+    socket.on("message_deleted", (p) => callbacksRef.current.onMessageDeleted?.(p));
+    socket.on("message_edited",  (p) => callbacksRef.current.onMessageEdited?.(p));
+    socket.on("error",           (p) => callbacksRef.current.onError?.(p));
   }, []);
 
   const disconnect = useCallback(() => {
@@ -152,6 +161,18 @@ export function useSocket(callbacks: SocketCallbacks) {
     }, []
   );
 
+  const markRead = useCallback((roomId: string, messageId: string) => {
+    socketRef.current?.emit("mark_read", { room_id: roomId, message_id: messageId });
+  }, []);
+
+  const deleteMessage = useCallback((roomId: string, messageId: string) => {
+    socketRef.current?.emit("delete_message", { room_id: roomId, message_id: messageId });
+  }, []);
+
+  const editMessage = useCallback((roomId: string, messageId: string, encryptedPayload: EncryptedPayload) => {
+    socketRef.current?.emit("edit_message", { room_id: roomId, message_id: messageId, encrypted_payload: encryptedPayload });
+  }, []);
+
   return {
     status,
     socketId,
@@ -162,6 +183,9 @@ export function useSocket(callbacks: SocketCallbacks) {
     sendMessage,
     sendTyping,
     sendReaction,
+    markRead,
+    deleteMessage,
+    editMessage,
     getSocket,          // ← WebRTC uses this to access the raw Socket instance
     isConnected: status === "connected",
   };

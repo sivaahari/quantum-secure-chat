@@ -65,10 +65,15 @@ class StoredMessage:
     encrypted_payload: dict
     plaintext_preview: str
     key_version:       int
-    timestamp:         float = field(default_factory=time.time)
-    is_llm_reply:      bool  = False
+    timestamp:         float         = field(default_factory=time.time)
+    is_llm_reply:      bool          = False
     # reactions: {emoji: [username, ...]}
     reactions:         Dict[str, List[str]] = field(default_factory=dict)
+    # read_by: {username: unix_ms_timestamp}
+    read_by:           Dict[str, float]     = field(default_factory=dict)
+    deleted:           bool          = False
+    edited:            bool          = False
+    edited_at:         Optional[float] = None
 
     def to_dict(self) -> dict:
         return {
@@ -80,6 +85,10 @@ class StoredMessage:
             "timestamp":         self.timestamp,
             "is_llm_reply":      self.is_llm_reply,
             "reactions":         self.reactions,
+            "read_by":           self.read_by,
+            "deleted":           self.deleted,
+            "edited":            self.edited,
+            "edited_at":         self.edited_at,
         }
 
 
@@ -299,6 +308,57 @@ class ChatStore:
                             del msg.reactions[emoji]
                     else:
                         msg.reactions[emoji].append(username)
+                    return msg.to_dict()
+            return None
+
+    # ── Edit / Delete ─────────────────────────────────────────────────────────
+
+    def delete_message(
+        self, room_id: str, message_id: str, requester: str, is_admin: bool
+    ) -> Optional[dict]:
+        """Tombstone a message. Only the sender or an admin may delete."""
+        with self._lock:
+            room = self.get_room(room_id)
+            if not room:
+                return None
+            for msg in room.messages:
+                if msg.message_id == message_id:
+                    if msg.sender != requester and not is_admin:
+                        return None  # forbidden
+                    msg.deleted           = True
+                    msg.encrypted_payload = {}
+                    return msg.to_dict()
+            return None
+
+    def edit_message(
+        self, room_id: str, message_id: str, new_payload: dict, requester: str
+    ) -> Optional[dict]:
+        """Replace a message's encrypted payload. Only the original sender may edit."""
+        with self._lock:
+            room = self.get_room(room_id)
+            if not room:
+                return None
+            for msg in room.messages:
+                if msg.message_id == message_id:
+                    if msg.sender != requester or msg.deleted:
+                        return None  # forbidden / already deleted
+                    msg.encrypted_payload = new_payload
+                    msg.edited            = True
+                    msg.edited_at         = time.time()
+                    return msg.to_dict()
+            return None
+
+    # ── Read receipts ─────────────────────────────────────────────────────────
+
+    def mark_read(self, room_id: str, message_id: str, username: str) -> Optional[dict]:
+        """Record that `username` read `message_id`. Returns updated message dict or None."""
+        with self._lock:
+            room = self.get_room(room_id)
+            if not room:
+                return None
+            for msg in room.messages:
+                if msg.message_id == message_id:
+                    msg.read_by[username] = time.time() * 1000  # ms timestamp
                     return msg.to_dict()
             return None
 

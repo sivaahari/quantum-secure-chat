@@ -15,6 +15,8 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import type { ChatMessage, Reactions, ReactionEmoji } from "@/types";
 import { ALLOWED_REACTIONS } from "@/types";
 import { formatTime } from "@/lib/utils";
@@ -23,19 +25,23 @@ interface MessageBubbleProps {
   message:   ChatMessage;
   isMine:    boolean;
   username:  string;
-  retryKey:  number;    // ← NEW: pass aes.keyCount here; change triggers retry
+  retryKey:  number;
   decrypt:   (payload: ChatMessage["encrypted_payload"]) => Promise<string>;
   onReact:   (messageId: string, emoji: string) => void;
+  onDelete:  (messageId: string) => void;
+  onEdit:    (messageId: string, newText: string) => void;
 }
 
 export function MessageBubble({
-  message, isMine, username, retryKey, decrypt, onReact,
+  message, isMine, username, retryKey, decrypt, onReact, onDelete, onEdit,
 }: MessageBubbleProps) {
   const [text,       setText]       = useState<string>(message.decrypted_text ?? "");
   const [loading,    setLoading]    = useState(!message.decrypted_text);
   const [showRaw,    setShowRaw]    = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [reactions,  setReactions]  = useState<Reactions>(message.reactions ?? {});
+  const [editing,    setEditing]    = useState(false);
+  const [editText,   setEditText]   = useState("");
 
   // Track whether this bubble is currently in an error/unknown state
   const hasErrorRef = useRef(false);
@@ -95,6 +101,25 @@ export function MessageBubble({
     setShowPicker(false);
   }, [message.message_id, onReact]);
 
+  const handleEditStart = useCallback(() => {
+    setEditText(text);
+    setEditing(true);
+    setShowPicker(false);
+  }, [text]);
+
+  const handleEditSave = useCallback(() => {
+    const trimmed = editText.trim();
+    if (trimmed && trimmed !== text) onEdit(message.message_id, trimmed);
+    setEditing(false);
+  }, [editText, text, message.message_id, onEdit]);
+
+  const handleEditCancel = useCallback(() => setEditing(false), []);
+
+  const handleDelete = useCallback(() => {
+    if (window.confirm("Delete this message?")) onDelete(message.message_id);
+    setShowPicker(false);
+  }, [message.message_id, onDelete]);
+
   const totalReactions = Object.values(reactions).reduce((sum, u) => sum + u.length, 0);
   const bubbleClass    = isMine ? "msg-mine" : "msg-other";
   const senderColor    = isMine ? "text-primary" : "text-slate-300";
@@ -109,57 +134,96 @@ export function MessageBubble({
 
       {/* Bubble */}
       <div className="relative group">
-        <div
-          className={`rounded-xl px-4 py-2.5 text-sm leading-relaxed cursor-pointer select-none transition-all ${bubbleClass}`}
-          onClick={handleBubbleClick}
-          onContextMenu={(e) => { e.preventDefault(); handleLongPress(); }}
-          title="Click: toggle encrypted view  |  Right-click: react"
-        >
-          {loading ? (
-            <span className="text-slate-400 animate-pulse text-xs">Decrypting…</span>
-          ) : showRaw ? (
-            <div className="font-mono text-[10px] text-slate-400 break-all space-y-1 max-w-xs">
-              <div>
-                <span className="text-slate-500">nonce: </span>
-                <span className="text-amber-400">{message.encrypted_payload.nonce_b64}</span>
-              </div>
-              <div>
-                <span className="text-slate-500">cipher: </span>
-                <span className="text-emerald-400">
-                  {message.encrypted_payload.ciphertext_b64.slice(0, 40)}…
-                </span>
-              </div>
-              <div>
-                <span className="text-slate-500">key v</span>
-                <span className="text-primary">{message.encrypted_payload.key_version}</span>
-              </div>
+        {editing ? (
+          <div className="flex flex-col gap-1.5 min-w-[200px]">
+            <Input
+              autoFocus
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleEditSave(); }
+                if (e.key === "Escape") handleEditCancel();
+              }}
+              className="bg-secondary/70 border-primary/40 text-sm text-slate-100"
+            />
+            <div className="flex gap-1.5 justify-end">
+              <Button size="sm" variant="ghost" onClick={handleEditCancel} className="text-xs h-6 px-2 text-slate-400">Cancel</Button>
+              <Button size="sm" onClick={handleEditSave} className="text-xs h-6 px-2 bg-primary">Save</Button>
             </div>
-          ) : (
-            <span className={text.startsWith("⚠") ? "text-amber-400 text-xs" : "text-slate-100"}>
-              {text}
-            </span>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div
+            className={`rounded-xl px-4 py-2.5 text-sm leading-relaxed cursor-pointer select-none transition-all ${bubbleClass}`}
+            onClick={message.deleted ? undefined : handleBubbleClick}
+            onContextMenu={(e) => { e.preventDefault(); if (!message.deleted) handleLongPress(); }}
+            title={message.deleted ? undefined : "Click: toggle encrypted view  |  Right-click: react/edit/delete"}
+          >
+            {message.deleted ? (
+              <span className="text-slate-500 italic text-xs">🗑 This message was deleted</span>
+            ) : loading ? (
+              <span className="text-slate-400 animate-pulse text-xs">Decrypting…</span>
+            ) : showRaw ? (
+              <div className="font-mono text-[10px] text-slate-400 break-all space-y-1 max-w-xs">
+                <div>
+                  <span className="text-slate-500">nonce: </span>
+                  <span className="text-amber-400">{message.encrypted_payload.nonce_b64}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500">cipher: </span>
+                  <span className="text-emerald-400">
+                    {message.encrypted_payload.ciphertext_b64.slice(0, 40)}…
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500">key v</span>
+                  <span className="text-primary">{message.encrypted_payload.key_version}</span>
+                </div>
+              </div>
+            ) : (
+              <span className={text.startsWith("⚠") ? "text-amber-400 text-xs" : "text-slate-100"}>
+                {text}
+              </span>
+            )}
+          </div>
+        )}
 
-        {/* Reaction picker */}
-        {showPicker && (
-          <div className={`absolute z-20 flex gap-1 p-1.5 rounded-xl bg-slate-800 border border-border shadow-xl
-              ${isMine ? "right-0" : "left-0"} -top-10`}>
-            {ALLOWED_REACTIONS.map((emoji) => {
-              const myReaction = reactions[emoji]?.includes(username);
-              return (
+        {/* Reaction + action picker */}
+        {showPicker && !message.deleted && (
+          <div className={`absolute z-20 flex flex-col gap-1 p-1.5 rounded-xl bg-slate-800 border border-border shadow-xl
+              ${isMine ? "right-0" : "left-0"} -top-12`}>
+            <div className="flex gap-1">
+              {ALLOWED_REACTIONS.map((emoji) => {
+                const myReaction = reactions[emoji]?.includes(username);
+                return (
+                  <button
+                    key={emoji}
+                    onClick={() => handleReact(emoji)}
+                    className={`text-lg w-8 h-8 rounded-lg flex items-center justify-center
+                      transition-all hover:scale-125 active:scale-95
+                      ${myReaction ? "bg-primary/30 ring-1 ring-primary/50" : "hover:bg-slate-700"}`}
+                    title={emoji}
+                  >
+                    {emoji}
+                  </button>
+                );
+              })}
+            </div>
+            {isMine && (
+              <div className="flex gap-1 border-t border-slate-700 pt-1">
                 <button
-                  key={emoji}
-                  onClick={() => handleReact(emoji)}
-                  className={`text-lg w-8 h-8 rounded-lg flex items-center justify-center
-                    transition-all hover:scale-125 active:scale-95
-                    ${myReaction ? "bg-primary/30 ring-1 ring-primary/50" : "hover:bg-slate-700"}`}
-                  title={emoji}
+                  onClick={handleEditStart}
+                  className="flex-1 text-xs px-2 py-1 rounded-lg text-slate-300 hover:bg-slate-700 transition-colors"
                 >
-                  {emoji}
+                  ✏ Edit
                 </button>
-              );
-            })}
+                <button
+                  onClick={handleDelete}
+                  className="flex-1 text-xs px-2 py-1 rounded-lg text-red-400 hover:bg-red-900/30 transition-colors"
+                >
+                  🗑 Delete
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -203,10 +267,30 @@ export function MessageBubble({
             ↻ key refresh
           </Badge>
         )}
-        <span className="text-[9px] text-slate-600">
-          {showRaw ? "🔒 encrypted" : "🔓 decrypted"} · right-click to react
-        </span>
+        {message.edited && !message.deleted && (
+          <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-slate-600 text-slate-500">
+            edited
+          </Badge>
+        )}
+        {!message.deleted && (
+          <span className="text-[9px] text-slate-600">
+            {showRaw ? "🔒 encrypted" : "🔓 decrypted"} · right-click to react
+          </span>
+        )}
       </div>
+
+      {/* Read receipts — only shown on messages I sent */}
+      {isMine && (() => {
+        const readers = Object.keys(message.read_by ?? {}).filter((u) => u !== username);
+        if (readers.length === 0) return null;
+        return (
+          <div className="flex items-center gap-1 px-1 justify-end">
+            <span className="text-[9px] text-slate-500">
+              ✓✓ Seen by {readers.join(", ")}
+            </span>
+          </div>
+        );
+      })()}
     </div>
   );
 }
