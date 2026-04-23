@@ -8,7 +8,7 @@ import type { P2PKeyStatus } from "@/hooks/useP2PKey";
 import type { RTCStatus }    from "@/hooks/useWebRTC";
 import type { P2PRole }      from "@/lib/webrtc";
 import type { BB84KeyResult } from "@/lib/bb84";
-import { qberStatus } from "@/lib/utils";
+import { qberStatus, safetyNumber } from "@/lib/utils";
 
 interface P2PKeyPanelProps {
   role:        P2PRole | null;
@@ -191,6 +191,25 @@ export function P2PKeyPanel({
                   <div className="font-mono text-[11px] text-emerald-400 break-all bg-black/30 rounded px-2 py-1.5">
                     {keyResult.keyHex}
                   </div>
+
+                  {/* Safety number — compare out-of-band with peer */}
+                  <div className="rounded-lg border border-violet-700/50 bg-violet-950/30 p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-semibold text-violet-300 uppercase tracking-wider">
+                        🛡 Safety Number
+                      </span>
+                      <Badge variant="outline" className="text-[9px] border-violet-700/50 text-violet-400 ml-auto">
+                        compare out-of-band
+                      </Badge>
+                    </div>
+                    <div className="font-mono text-lg tracking-[0.25em] text-violet-200 text-center py-1 select-all">
+                      {safetyNumber(keyResult.keyHex)}
+                    </div>
+                    <p className="text-[10px] text-violet-400/80 text-center">
+                      Read this to your peer verbally. If it matches on both sides, no MITM attack occurred.
+                    </p>
+                  </div>
+
                   <div className="p-2 rounded-lg bg-emerald-950/20 border border-emerald-800/30">
                     <p className="text-[10px] text-emerald-500">
                       🔐 This key was derived entirely in your browser via WebRTC DataChannel.

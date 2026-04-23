@@ -8,7 +8,7 @@ import { Switch }  from "@/components/ui/switch";
 import { Label }   from "@/components/ui/label";
 import { BlochSphereViz } from "@/components/BlochSphereViz";
 import type { KeyInfo, BB84Stats } from "@/types";
-import { qberStatus, shortenHex, formatTime } from "@/lib/utils";
+import { qberStatus, shortenHex, formatTime, safetyNumber } from "@/lib/utils";
 
 interface QuantumKeyPanelProps {
   roomId:      string;
@@ -170,6 +170,24 @@ export function QuantumKeyPanel({
                 <div className="mt-1 font-mono text-[11px] text-emerald-400 break-all bg-black/30 rounded px-2 py-1.5">
                   {bb84Stats.final_key_hex}
                 </div>
+              </div>
+
+              {/* Safety number */}
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-semibold text-primary/80 uppercase tracking-wider">
+                    🛡 Safety Number
+                  </span>
+                  <Badge variant="outline" className="text-[9px] border-primary/30 text-primary/70 ml-auto">
+                    compare with peers
+                  </Badge>
+                </div>
+                <div className="font-mono text-base tracking-[0.25em] text-primary text-center py-0.5 select-all">
+                  {safetyNumber(bb84Stats.final_key_hex)}
+                </div>
+                <p className="text-[10px] text-slate-500 text-center">
+                  All room members should see this same number.
+                </p>
               </div>
 
               {/* Messages used */}

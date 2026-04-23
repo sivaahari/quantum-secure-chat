@@ -57,6 +57,18 @@ export function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+/**
+ * Derive a human-readable "safety number" from a 64-char key hex.
+ * Takes the first 20 hex chars (10 bytes) and formats them as
+ * five groups of 4 uppercase chars: "A3F2 B891 C45D E720 1F3A"
+ * Both peers should compare this out-of-band to confirm no MITM.
+ */
+export function safetyNumber(keyHex: string): string {
+  if (!keyHex || keyHex.length < 20) return "";
+  const s = keyHex.slice(0, 20).toUpperCase();
+  return [s.slice(0, 4), s.slice(4, 8), s.slice(8, 12), s.slice(12, 16), s.slice(16, 20)].join(" ");
+}
+
 /** Format QBER as percentage string with color class */
 export function qberStatus(qber: number): { text: string; cls: string } {
   const pct = (qber * 100).toFixed(2);
