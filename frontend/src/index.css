@@ -6,7 +6,32 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
 
 @layer base {
+  /* ── Light theme (default) ─────────────────────────────────────────────── */
   :root {
+    --background:            210 20% 98%;
+    --foreground:            222 47% 11%;
+    --card:                  0 0% 100%;
+    --card-foreground:       222 47% 11%;
+    --popover:               0 0% 100%;
+    --popover-foreground:    222 47% 11%;
+    --primary:               199 100% 36%;
+    --primary-foreground:    0 0% 100%;
+    --secondary:             210 40% 93%;
+    --secondary-foreground:  222 47% 11%;
+    --muted:                 210 40% 93%;
+    --muted-foreground:      215 20% 45%;
+    --accent:                210 40% 93%;
+    --accent-foreground:     222 47% 11%;
+    --destructive:           0 84% 60%;
+    --destructive-foreground:0 0% 100%;
+    --border:                214 32% 86%;
+    --input:                 214 32% 86%;
+    --ring:                  199 100% 36%;
+    --radius:                0.6rem;
+  }
+
+  /* ── Dark theme ────────────────────────────────────────────────────────── */
+  .dark {
     --background:            222 47% 8%;
     --foreground:            210 40% 92%;
     --card:                  222 47% 11%;
@@ -36,11 +61,18 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     background-image:
-      radial-gradient(ellipse at 20% 50%, rgba(0,194,240,0.04) 0%, transparent 60%),
-      radial-gradient(ellipse at 80% 20%, rgba(99,102,241,0.04) 0%, transparent 60%);
+      radial-gradient(ellipse at 20% 50%, rgba(0,194,240,0.03) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 20%, rgba(99,102,241,0.03) 0%, transparent 60%);
     min-height: 100vh;
     /* Prevent overscroll on iOS */
     overscroll-behavior: none;
+  }
+
+  .dark body,
+  .dark {
+    background-image:
+      radial-gradient(ellipse at 20% 50%, rgba(0,194,240,0.04) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 20%, rgba(99,102,241,0.04) 0%, transparent 60%);
   }
 
   /* Custom scrollbar */
@@ -69,8 +101,8 @@
   .status-dot-yellow { @apply inline-block w-2 h-2 rounded-full bg-amber-400; }
 
   /* Message bubbles */
-  .msg-mine  { @apply bg-primary/15 border border-primary/30; }
-  .msg-other { @apply bg-secondary border border-border; }
+  .msg-mine  { @apply bg-primary/10 border border-primary/25 text-foreground; }
+  .msg-other { @apply bg-secondary  border border-border    text-foreground; }
 
   /* ── Mobile safe-area padding ────────────────────────────────────────────
      Handles the iPhone home indicator and Android nav bar.

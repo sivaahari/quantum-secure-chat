@@ -32,7 +32,22 @@ import type { P2PRole, P2PMessageType } from "@/lib/webrtc";
 type JoinPhase = "idle" | "connecting" | "joining" | "joined";
 const BASE_TITLE = "Quantum-Secure Chat";
 
+// ── Theme helpers (persisted in localStorage, default = dark) ─────────────────
+function getInitialTheme(): "dark" | "light" {
+  try { return (localStorage.getItem("qsc_theme") as "dark" | "light") ?? "dark"; }
+  catch { return "dark"; }
+}
+function applyTheme(t: "dark" | "light") {
+  document.documentElement.classList.toggle("dark", t === "dark");
+  try { localStorage.setItem("qsc_theme", t); } catch { /* noop */ }
+}
+
 export default function App() {
+  // ── Theme ──────────────────────────────────────────────────────────────────
+  const [theme, setTheme] = useState<"dark" | "light">(getInitialTheme);
+  useEffect(() => { applyTheme(theme); }, [theme]);
+  const toggleTheme = useCallback(() => setTheme((t) => t === "dark" ? "light" : "dark"), []);
+
   // ── Auth ───────────────────────────────────────────────────────────────────
   const auth = useAuth();
 
@@ -271,10 +286,22 @@ export default function App() {
   const hasAnyKey  = p2pKeyActive || qKey.hasKey;
   const keyVersion = p2pKeyActive ? p2pKeyVersion : (qKey.keyInfo?.key_version ?? 0);
 
+  // ── Theme toggle button (fixed, appears on every view) ───────────────────
+  const ThemeToggle = (
+    <button
+      onClick={toggleTheme}
+      className="fixed bottom-4 right-4 z-50 w-9 h-9 rounded-full bg-card border border-border shadow-lg flex items-center justify-center text-base hover:border-primary/50 transition-colors"
+      title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+    >
+      {theme === "dark" ? "☀️" : "🌙"}
+    </button>
+  );
+
   // ── Render: loading ────────────────────────────────────────────────────────
   if (auth.status === "loading") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
+        {ThemeToggle}
         <div className="text-center space-y-3">
           <div className="text-4xl animate-pulse">⚛</div>
           <p className="text-slate-400 text-sm">Loading…</p>
@@ -287,6 +314,7 @@ export default function App() {
   if (auth.status === "unauthenticated") {
     return (
       <>
+        {ThemeToggle}
         <AuthPage
           onRegister={auth.register}
           onLogin={auth.login}
@@ -301,6 +329,7 @@ export default function App() {
   if (auth.status === "pending") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        {ThemeToggle}
         <div className="text-center space-y-4 max-w-sm">
           <div className="text-5xl">⏳</div>
           <h2 className="text-lg font-semibold text-slate-200">Awaiting Approval</h2>
@@ -321,6 +350,7 @@ export default function App() {
   if (auth.user?.role === "admin" && joinPhase === "idle") {
     return (
       <div className="flex flex-col h-screen-safe bg-background overflow-hidden">
+        {ThemeToggle}
         <Toaster richColors position="top-right" />
         <header className="flex items-center justify-between px-4 py-2 border-b border-border bg-card/80 flex-shrink-0">
           <div className="flex items-center gap-2">
@@ -342,6 +372,7 @@ export default function App() {
   if (joinPhase === "idle" || joinPhase === "connecting" || joinPhase === "joining") {
     return (
       <>
+        {ThemeToggle}
         <RoomAccessPage
           token={auth.token}
           user={auth.user!}
@@ -356,6 +387,7 @@ export default function App() {
   // ── Render: in a room — full chat UI ───────────────────────────────────────
   return (
     <div className="flex flex-col h-screen-safe bg-background overflow-hidden">
+      {ThemeToggle}
       <Toaster richColors position="top-right" />
 
       <header className="flex items-center justify-between px-4 py-2 border-b border-border bg-card/80 backdrop-blur-sm z-10 flex-shrink-0">
