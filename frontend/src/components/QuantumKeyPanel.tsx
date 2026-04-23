@@ -11,11 +11,12 @@ import type { KeyInfo, BB84Stats } from "@/types";
 import { qberStatus, shortenHex, formatTime } from "@/lib/utils";
 
 interface QuantumKeyPanelProps {
-  roomId:     string;
-  keyInfo:    KeyInfo | null;
-  bb84Stats:  BB84Stats | null;
-  generating: boolean;
-  onGenerate: (opts: {
+  roomId:      string;
+  keyInfo:     KeyInfo | null;
+  bb84Stats:   BB84Stats | null;
+  qberHistory: KeyInfo[];
+  generating:  boolean;
+  onGenerate:  (opts: {
     numQubits:     number;
     noiseEnabled:  boolean;
     depolarProb:   number;
@@ -24,7 +25,7 @@ interface QuantumKeyPanelProps {
 }
 
 export function QuantumKeyPanel({
-  roomId, keyInfo, bb84Stats, generating, onGenerate,
+  roomId, keyInfo, bb84Stats, qberHistory, generating, onGenerate,
 }: QuantumKeyPanelProps) {
   const [numQubits,     setNumQubits]     = useState(256);
   const [noiseEnabled,  setNoiseEnabled]  = useState(true);
@@ -298,7 +299,94 @@ export function QuantumKeyPanel({
             </CardContent>
           </Card>
         )}
+
+        {/* QBER history sparkline */}
+        {qberHistory.length > 0 && (
+          <Card className="bg-card border-border">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                📈 QBER History
+                <span className="text-[10px] font-normal text-slate-500 ml-auto">
+                  {qberHistory.length} key{qberHistory.length !== 1 ? "s" : ""}
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <QBERSparkline history={qberHistory} />
+              <div className="flex items-center gap-3 mt-2 text-[9px] text-slate-500">
+                <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-sm bg-emerald-500" /> Safe (&lt;5%)</span>
+                <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-sm bg-amber-500" /> Warning (5–11%)</span>
+                <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-sm bg-red-500" /> Abort (&gt;11%)</span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
+  );
+}
+
+// ── Inline SVG sparkline — no external chart library ──────────────────────────
+
+function QBERSparkline({ history }: { history: KeyInfo[] }) {
+  const W = 280, H = 90;
+  const PAD = { top: 8, right: 8, bottom: 20, left: 28 };
+  const innerW = W - PAD.left - PAD.right;
+  const innerH = H - PAD.top - PAD.bottom;
+
+  // Y axis: 0 → 15% (so the 11% abort line is visible with headroom)
+  const Y_MAX = 0.15;
+  const toY = (v: number) => PAD.top + innerH - (v / Y_MAX) * innerH;
+  const toX = (i: number) => PAD.left + (history.length === 1 ? innerW / 2 : (i / (history.length - 1)) * innerW);
+
+  // Abort threshold at 11%
+  const abortY = toY(0.11);
+  // Safe threshold at 5%
+  const safeY  = toY(0.05);
+
+  // SVG polyline points
+  const points = history.map((ki, i) => `${toX(i)},${toY(ki.qber)}`).join(" ");
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }}>
+      {/* Threshold bands */}
+      <rect x={PAD.left} y={abortY} width={innerW} height={innerH - (abortY - PAD.top)} fill="rgb(239 68 68 / 0.07)" />
+      <rect x={PAD.left} y={safeY}  width={innerW} height={abortY - safeY}               fill="rgb(245 158 11 / 0.07)" />
+      <rect x={PAD.left} y={PAD.top} width={innerW} height={safeY - PAD.top}              fill="rgb(16 185 129 / 0.07)" />
+
+      {/* Threshold lines */}
+      <line x1={PAD.left} y1={abortY} x2={PAD.left + innerW} y2={abortY} stroke="rgb(239 68 68 / 0.5)"  strokeWidth="1" strokeDasharray="3 2" />
+      <line x1={PAD.left} y1={safeY}  x2={PAD.left + innerW} y2={safeY}  stroke="rgb(245 158 11 / 0.4)" strokeWidth="1" strokeDasharray="3 2" />
+
+      {/* Threshold labels */}
+      <text x={PAD.left - 2} y={abortY + 3} textAnchor="end" fontSize="7" fill="rgb(239 68 68 / 0.7)">11%</text>
+      <text x={PAD.left - 2} y={safeY  + 3} textAnchor="end" fontSize="7" fill="rgb(245 158 11 / 0.7)">5%</text>
+      <text x={PAD.left - 2} y={PAD.top + innerH + 3} textAnchor="end" fontSize="7" fill="rgb(100 116 139)">0%</text>
+
+      {/* Line */}
+      {history.length > 1 && (
+        <polyline points={points} fill="none" stroke="rgb(99 102 241 / 0.6)" strokeWidth="1.5" strokeLinejoin="round" />
+      )}
+
+      {/* Data points */}
+      {history.map((ki, i) => {
+        const cx = toX(i), cy = toY(ki.qber);
+        const col = ki.qber < 0.05 ? "rgb(16 185 129)" : ki.qber < 0.11 ? "rgb(245 158 11)" : "rgb(239 68 68)";
+        return (
+          <g key={ki.key_version}>
+            <circle cx={cx} cy={cy} r="4" fill={col} opacity="0.9" />
+            {/* Version label below x-axis */}
+            <text x={cx} y={H - 4} textAnchor="middle" fontSize="7" fill="rgb(100 116 139)">
+              v{ki.key_version}
+            </text>
+          </g>
+        );
+      })}
+
+      {/* Y-axis line */}
+      <line x1={PAD.left} y1={PAD.top} x2={PAD.left} y2={PAD.top + innerH} stroke="rgb(51 65 85)" strokeWidth="1" />
+      {/* X-axis line */}
+      <line x1={PAD.left} y1={PAD.top + innerH} x2={PAD.left + innerW} y2={PAD.top + innerH} stroke="rgb(51 65 85)" strokeWidth="1" />
+    </svg>
   );
 }

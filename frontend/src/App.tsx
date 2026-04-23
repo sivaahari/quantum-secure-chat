@@ -431,7 +431,7 @@ export default function App() {
         </TabsContent>
         <TabsContent value="quantum" className="flex-1 overflow-auto m-0 p-0 data-[state=inactive]:hidden">
           <QuantumKeyPanel roomId={roomId} keyInfo={qKey.keyInfo} bb84Stats={qKey.bb84Stats}
-            generating={qKey.generating} onGenerate={handleGenerate} />
+            qberHistory={qKey.qberHistory} generating={qKey.generating} onGenerate={handleGenerate} />
         </TabsContent>
         <TabsContent value="crypto" className="flex-1 overflow-auto m-0 p-0 data-[state=inactive]:hidden">
           <EncryptionDemo roomId={roomId} hasKey={hasAnyKey} decrypt={decrypt} />

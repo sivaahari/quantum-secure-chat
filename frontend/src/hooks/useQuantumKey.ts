@@ -14,22 +14,24 @@ import { generateQuantumKey } from "@/lib/api";
 import { toast } from "sonner";
 
 export interface QuantumKeyState {
-  keyInfo:     KeyInfo | null;
-  bb84Stats:   BB84Stats | null;
-  keyHex:      string;                   // current key hex
-  keyHexMap:   Map<number, string>;      // version → hex (ALL versions)
-  generating:  boolean;
-  error:       string | null;
+  keyInfo:        KeyInfo | null;
+  bb84Stats:      BB84Stats | null;
+  keyHex:         string;                   // current key hex
+  keyHexMap:      Map<number, string>;      // version → hex (ALL versions)
+  qberHistory:    KeyInfo[];                // ordered list of KeyInfo for QBER chart
+  generating:     boolean;
+  error:          string | null;
 }
 
 export function useQuantumKey(roomId: string) {
   const [state, setState] = useState<QuantumKeyState>({
-    keyInfo:    null,
-    bb84Stats:  null,
-    keyHex:     "",
-    keyHexMap:  new Map(),
-    generating: false,
-    error:      null,
+    keyInfo:      null,
+    bb84Stats:    null,
+    keyHex:       "",
+    keyHexMap:    new Map(),
+    qberHistory:  [],
+    generating:   false,
+    error:        null,
   });
 
   // ── Generate a fresh key via BB84 ─────────────────────────────────────────
@@ -58,13 +60,19 @@ export function useQuantumKey(roomId: string) {
         setState((s) => {
           const updatedMap = new Map(s.keyHexMap);
           updatedMap.set(newVersion, newHex);
+          // Append to QBER history (deduplicate by version)
+          const alreadyIn = s.qberHistory.some((k) => k.key_version === newVersion);
+          const updatedHistory = alreadyIn
+            ? s.qberHistory.map((k) => k.key_version === newVersion ? result.key_info : k)
+            : [...s.qberHistory, result.key_info];
           return {
-            keyInfo:    result.key_info,
-            bb84Stats:  result.bb84,
-            keyHex:     newHex,
-            keyHexMap:  updatedMap,
-            generating: false,
-            error:      null,
+            keyInfo:      result.key_info,
+            bb84Stats:    result.bb84,
+            keyHex:       newHex,
+            keyHexMap:    updatedMap,
+            qberHistory:  updatedHistory,
+            generating:   false,
+            error:        null,
           };
         });
 
@@ -114,11 +122,21 @@ export function useQuantumKey(roomId: string) {
         latestHex     = latest.key_hex ?? s.keyHex;
       }
 
+      // Build QBER history from the incoming key history (deduplicated)
+      const updatedHistory = [...s.qberHistory];
+      for (const ki of keyHistory) {
+        if (!updatedHistory.some((h) => h.key_version === ki.key_version)) {
+          updatedHistory.push(ki);
+        }
+      }
+      updatedHistory.sort((a, b) => a.key_version - b.key_version);
+
       return {
         ...s,
-        keyInfo:    latestKeyInfo,
-        keyHex:     latestHex,
-        keyHexMap:  updatedMap,
+        keyInfo:     latestKeyInfo,
+        keyHex:      latestHex,
+        keyHexMap:   updatedMap,
+        qberHistory: updatedHistory,
       };
     });
   }, []);
@@ -144,11 +162,26 @@ export function useQuantumKey(roomId: string) {
           updatedMap.set(keyInfo.key_version, keyInfo.key_hex);
         }
 
+        // Update QBER history
+        const updatedHistory = [...s.qberHistory];
+        if (keyHistory) {
+          for (const ki of keyHistory) {
+            if (!updatedHistory.some((h) => h.key_version === ki.key_version)) {
+              updatedHistory.push(ki);
+            }
+          }
+        }
+        if (!updatedHistory.some((h) => h.key_version === keyInfo.key_version)) {
+          updatedHistory.push(keyInfo);
+        }
+        updatedHistory.sort((a, b) => a.key_version - b.key_version);
+
         return {
           ...s,
           keyInfo,
-          keyHex:    keyInfo.key_hex ?? s.keyHex,
-          keyHexMap: updatedMap,
+          keyHex:      keyInfo.key_hex ?? s.keyHex,
+          keyHexMap:   updatedMap,
+          qberHistory: updatedHistory,
         };
       });
     },
