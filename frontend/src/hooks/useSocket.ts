@@ -17,7 +17,7 @@ import type {
   EncryptedPayload,
 } from "@/types";
 
-const SOCKET_URL = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:5000";
+const SOCKET_URL = (import.meta.env.VITE_BACKEND_URL ?? "http://localhost:5000").replace(/\/$/, "");
 
 export interface SocketCallbacks {
   onRoomJoined?:      (payload: RoomJoinedPayload)     => void;

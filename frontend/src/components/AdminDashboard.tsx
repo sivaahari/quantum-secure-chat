@@ -7,7 +7,7 @@ import { Input }  from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast }  from "sonner";
 
-const BACKEND = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:5000";
+const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? "http://localhost:5000").replace(/\/$/, "");
 
 interface AdminDashboardProps {
   token:     string;

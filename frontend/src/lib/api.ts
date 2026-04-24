@@ -6,7 +6,7 @@
 
 import type { BB84Stats, KeyInfo, ChatMessage, RoomInfo } from "@/types";
 
-const BACKEND = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:5000";
+const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? "http://localhost:5000").replace(/\/$/, "");
 const BASE = `${BACKEND}/api`;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -21,10 +21,10 @@ async function apiFetch<T = Record<string, unknown>>(
     headers: { "Content-Type": "application/json" },
     ...options,
   });
-  const data = await res.json();
-  if (!data.ok && !res.ok) {
-    throw new Error(data.error ?? `HTTP ${res.status}`);
-  }
+  let data: Record<string, unknown>;
+  try { data = await res.json(); }
+  catch { throw new Error(`Server returned non-JSON response (HTTP ${res.status})`); }
+  if (!res.ok) throw new Error((data.error as string) ?? `HTTP ${res.status}`);
   return data as T;
 }
 

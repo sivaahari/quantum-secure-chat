@@ -15,7 +15,7 @@ import { Label }  from "@/components/ui/label";
 import { toast }  from "sonner";
 import type { AuthUser } from "@/hooks/useAuth";
 
-const BACKEND = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:5000";
+const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? "http://localhost:5000").replace(/\/$/, "");
 
 interface RoomAccessPageProps {
   token:       string;

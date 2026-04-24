@@ -49,6 +49,8 @@ export function AuthPage({ onRegister, onLogin, error }: AuthPageProps) {
           setConfirm("");
         }
       }
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Unexpected error — check browser console");
     } finally {
       setLoading(false);
     }

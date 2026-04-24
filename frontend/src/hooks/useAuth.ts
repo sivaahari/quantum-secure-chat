@@ -6,7 +6,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 
-const BACKEND = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:5000";
+const BACKEND = (import.meta.env.VITE_BACKEND_URL ?? "http://localhost:5000").replace(/\/$/, "");
 const TOKEN_KEY = "qsc_token";
 
 export interface AuthUser {
@@ -23,9 +23,15 @@ export type AuthStatus = "loading" | "unauthenticated" | "pending" | "authentica
 async function apiFetch(path: string, options: RequestInit = {}, token?: string) {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res  = await fetch(`${BACKEND}${path}`, { headers, ...options });
-  const data = await res.json();
-  return { data, ok: res.ok };
+  try {
+    const res = await fetch(`${BACKEND}${path}`, { headers, ...options });
+    let data: Record<string, any> = {};
+    try { data = await res.json(); } catch { data = { error: `Server error (HTTP ${res.status})` }; }
+    return { data, ok: res.ok };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Network error — is the backend reachable?";
+    return { data: { error: msg }, ok: false };
+  }
 }
 
 export function useAuth() {
