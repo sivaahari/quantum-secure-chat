@@ -50,6 +50,13 @@ export function MessageBubble({
     setReactions(message.reactions ?? {});
   }, [message.reactions]);
 
+  // When a message is edited, reset decrypt state so the effect re-runs
+  useEffect(() => {
+    if (!message.edited_at) return;
+    setText("");
+    hasErrorRef.current = true;
+  }, [message.edited_at]);
+
   // ── Decrypt effect ────────────────────────────────────────────────────────
   // Runs when:
   //   1. The message itself changes (message.message_id)
@@ -82,10 +89,10 @@ export function MessageBubble({
         hasErrorRef.current = true;
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [message.message_id, retryKey]);
-  // ↑ retryKey (= aes.keyCount) is the retry trigger.
-  //   When a new CryptoKey is imported, keyCount increases, this effect
-  //   re-runs, and if hasErrorRef is true it retries the decryption.
+  }, [message.message_id, retryKey, message.edited_at]);
+  // ↑ retryKey  — retry after new CryptoKey import (keyCount increments)
+  //   edited_at — re-decrypt after sender edits; the edited_at effect above
+  //               pre-sets hasErrorRef=true so the guard doesn't short-circuit
 
   const handleBubbleClick = useCallback(() => {
     setShowRaw((v) => !v);
