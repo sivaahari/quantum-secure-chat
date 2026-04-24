@@ -2,4 +2,4 @@
 nixPkgs = ["python312"]
 
 [start]
-cmd = "gunicorn --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker --workers 1 --bind 0.0.0.0:\ --timeout 120 backend.app:app"
+cmd = "python backend/app.py"
