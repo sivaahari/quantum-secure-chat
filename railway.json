@@ -3,7 +3,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "python app.py",
+    "startCommand": "python backend/app.py",
     "restartPolicyType": "ON_FAILURE"
   }
 }
